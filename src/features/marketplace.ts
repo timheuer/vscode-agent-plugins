@@ -252,6 +252,18 @@ async function expandGroupDirectoryReference(
 		(entry) => entry.type === 'file' && typeof entry.name === 'string' && /\.md$/i.test(entry.name)
 	);
 	if (markdownFiles.length > 0) {
+		// Check if this is a leaf item directory containing only descriptor files (e.g., SKILL.md for skills).
+		// If so, don't expand - let the caller use the directory path as the item name.
+		const descriptorFiles = descriptorDefaultsForGroup(groupKey);
+		const allAreDescriptors = markdownFiles.every(
+			(entry) => descriptorFiles.some((df) => df.toLowerCase() === entry.name?.toLowerCase())
+		);
+		if (allAreDescriptors) {
+			// This is a leaf directory (e.g., "skills/akka-best-practices" containing just SKILL.md)
+			// Return undefined so the caller uses buildItemFromPath with the directory name
+			return undefined;
+		}
+
 		return markdownFiles.map((entry) => {
 			const item = buildItemFromPath(`${cleanedPath}/${entry.name ?? ''}`, groupKey, repoContext);
 			return {
@@ -283,9 +295,13 @@ function buildItemFromPath(pathValue: string, groupKey: string, repoContext?: Re
 	const cleanedPath = normalizeRelativePath(pathValue);
 	const descriptorFiles = descriptorDefaultsForGroup(groupKey);
 
+	// Extract the last path segment as the display name
+	const pathSegments = cleanedPath.split('/').filter(Boolean);
+	const displayName = pathSegments.length > 0 ? pathSegments[pathSegments.length - 1] : cleanedPath;
+
 	if (!repoContext || isHttpUrl(cleanedPath)) {
 		return {
-			name: cleanedPath,
+			name: displayName,
 			path: cleanedPath,
 			metadataUrl: isHttpUrl(cleanedPath) ? cleanedPath : undefined,
 			metadataFallbackUrls: [],
@@ -296,7 +312,7 @@ function buildItemFromPath(pathValue: string, groupKey: string, repoContext?: Re
 	const isMarkdownPath = /\.md$/i.test(cleanedPath);
 	if (isMarkdownPath) {
 		return {
-			name: cleanedPath,
+			name: displayName,
 			path: cleanedPath,
 			metadataUrl: `${repoContext.rawBaseUrl}/${cleanedPath}`,
 			metadataFallbackUrls: [],
@@ -308,7 +324,7 @@ function buildItemFromPath(pathValue: string, groupKey: string, repoContext?: Re
 	const docCandidate = `${repoContext.blobBaseUrl}/${cleanedPath}/${descriptorFiles[0]}`;
 
 	return {
-		name: cleanedPath,
+		name: displayName,
 		path: cleanedPath,
 		metadataUrl: metadataCandidates[0],
 		metadataFallbackUrls: metadataCandidates.slice(1),

@@ -70,30 +70,35 @@ export class MarketplaceTreeDataProvider implements vscode.TreeDataProvider<Tree
 
         this._loading = true;
         try {
-            const urls = getMarketplaceUrls();
-            if (urls.length === 0) {
-                this._marketplaces = [];
-                this._onDidChangeTreeData.fire();
-                return;
-            }
+            await vscode.window.withProgress(
+                { location: { viewId: 'vscode-agent-plugins.marketplaceExplorer' } },
+                async () => {
+                    const urls = getMarketplaceUrls();
+                    if (urls.length === 0) {
+                        this._marketplaces = [];
+                        this._onDidChangeTreeData.fire();
+                        return;
+                    }
 
-            const result = await fetchAllMarketplaces(urls);
+                    const result = await fetchAllMarketplaces(urls);
 
-            const marketplaceMap = new Map<string, MarketplacePlugin[]>();
-            for (const plugin of result.plugins) {
-                const existing = marketplaceMap.get(plugin.sourceUrl) ?? [];
-                existing.push(plugin);
-                marketplaceMap.set(plugin.sourceUrl, existing);
-            }
+                    const marketplaceMap = new Map<string, MarketplacePlugin[]>();
+                    for (const plugin of result.plugins) {
+                        const existing = marketplaceMap.get(plugin.sourceUrl) ?? [];
+                        existing.push(plugin);
+                        marketplaceMap.set(plugin.sourceUrl, existing);
+                    }
 
-            this._marketplaces = urls.map((url) => ({
-                type: 'marketplace' as const,
-                url,
-                plugins: marketplaceMap.get(url) ?? []
-            }));
+                    this._marketplaces = urls.map((url) => ({
+                        type: 'marketplace' as const,
+                        url,
+                        plugins: marketplaceMap.get(url) ?? []
+                    }));
 
-            this.services.logger.info(`Tree view loaded ${result.plugins.length} plugin(s) from ${urls.length} marketplace(s).`);
-            this._onDidChangeTreeData.fire();
+                    this.services.logger.info(`Tree view loaded ${result.plugins.length} plugin(s) from ${urls.length} marketplace(s).`);
+                    this._onDidChangeTreeData.fire();
+                }
+            );
         } finally {
             this._loading = false;
         }
