@@ -1,0 +1,106 @@
+{
+  "name": "vscode-agent-plugins",
+  "displayName": "Agent Plugins Browser",
+  "description": "A browser of agent marketplaces to install plugins.",
+  "version": "0.0.0-placeholder",
+  "preview": true,
+  "author": {
+    "name": "Tim Heuer",
+    "url": "https://github.com/timheuer"
+  },
+  "publisher": "timheuer",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/timheuer/vscode-agent-plugins"
+  },
+  "bugs": {
+    "url": "https://github.com/timheuer/vscode-agent-plugins/issues"
+  },
+  "qna": "https://github.com/timheuer/vscode-agent-plugins/issues",
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "vscode-agent-plugins.browseMarketplace",
+        "title": "Agent Plugins: Browse Marketplace"
+      },
+      {
+        "command": "vscode-agent-plugins.addMarketplaceUrl",
+        "title": "Agent Plugins: Add Marketplace URL"
+      },
+      {
+        "command": "vscode-agent-plugins.removeMarketplaceUrl",
+        "title": "Agent Plugins: Remove Marketplace URL"
+      }
+    ],
+    "configuration": {
+      "title": "Agent Plugins",
+      "properties": {
+        "vscodeAgentPlugins.marketplaces": {
+          "type": "array",
+          "default": [ ],
+          "description": "List of marketplace.json URLs to browse for agent plugins.",
+          "items": {
+            "type": "string",
+            "pattern": "^https?://"
+          }
+        },
+        "vscodeAgentPlugins.logLevel": {
+          "type": "string",
+          "enum": [
+            "off",
+            "error",
+            "warn",
+            "info",
+            "debug",
+            "trace"
+          ],
+          "default": "info",
+          "description": "Log level for extension output channel logging."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test",
+    "deploy": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.109.0",
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.25.3",
+    "eslint": "^9.25.1",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@timheuer/vscode-ext-logger": "^0.1.35",
+    "@vscode-elements/elements": "^2.5.0",
+    "@vscode/codicons": "^0.0.44"
+  }
+}
