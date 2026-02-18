@@ -424,7 +424,7 @@ function createPreviewWebviewHtml(
       padding-bottom: 16px;
       border-bottom: 1px solid var(--vscode-panel-border);
     }
-    .header-icon {
+    .header-icon.codicon {
       font-size: 24px;
       line-height: 1;
       margin-top: 2px;

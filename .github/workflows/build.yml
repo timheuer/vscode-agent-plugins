@@ -55,9 +55,13 @@ jobs:
 
       - name: 🔗 Marketplace Link
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        shell: pwsh
         run: |
-          Write-Host "::notice::Published to VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=timheuer.vscode-agent-plugins"
+          echo "## 🚀 Published Extension" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | ${{ steps.nbgv.outputs.SimpleVersion }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Marketplace** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=timheuer.vscode-agent-plugins) |" >> $GITHUB_STEP_SUMMARY
 
       - name: ⬆️ Upload artifact
         uses: actions/upload-artifact@v4
