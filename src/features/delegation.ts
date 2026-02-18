@@ -133,10 +133,11 @@ async function fetchGitHubPathContents(repoContext: RepoContext, relativePath: s
     }
 }
 
-async function downloadRawFile(rawUrl: string, targetPath: string): Promise<boolean> {
+async function downloadRawFile(rawUrl: string, targetPath: string, logger?: { warn: (msg: string) => void }): Promise<boolean> {
     try {
         const response = await fetch(rawUrl);
         if (!response.ok) {
+            logger?.warn(`Failed to download ${rawUrl}: ${response.status} ${response.statusText}`);
             return false;
         }
 
@@ -144,7 +145,8 @@ async function downloadRawFile(rawUrl: string, targetPath: string): Promise<bool
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
         await fs.writeFile(targetPath, bytes);
         return true;
-    } catch {
+    } catch (error) {
+        logger?.warn(`Failed to download ${rawUrl}: ${error instanceof Error ? error.message : String(error)}`);
         return false;
     }
 }
@@ -303,26 +305,32 @@ async function materializeLocalInstallStructure(workspaceRoot: string, plugins: 
     const skillsRoot = path.join(workspaceRoot, '.agents', 'skills');
     const agentsRoot = path.join(workspaceRoot, '.github', 'agents');
 
+    const installPromises: Promise<void>[] = [];
+
     for (const plugin of plugins) {
         for (const group of plugin.groups) {
             if (group.key === 'skills') {
                 for (const item of group.items) {
-                    await installSkillItem(plugin, item, skillsRoot);
+                    installPromises.push(installSkillItem(plugin, item, skillsRoot));
                 }
             }
 
             if (group.key === 'agents') {
                 for (const item of group.items) {
-                    await installAgentItem(plugin, item, agentsRoot);
+                    installPromises.push(installAgentItem(plugin, item, agentsRoot));
                 }
             }
         }
     }
+
+    await Promise.all(installPromises);
 }
 
 async function materializeUserInstallStructure(userRoot: string, plugins: MarketplacePlugin[]): Promise<InstalledPathCollection> {
     const skillPaths = new Set<string>();
     const agentPaths = new Set<string>();
+
+    const installPromises: Promise<void>[] = [];
 
     for (const plugin of plugins) {
         const pluginRoot = path.join(userRoot, getMarketplaceName(plugin.sourceUrl), getPluginName(plugin));
@@ -332,7 +340,7 @@ async function materializeUserInstallStructure(userRoot: string, plugins: Market
         for (const group of plugin.groups) {
             if (group.key === 'skills') {
                 for (const item of group.items) {
-                    await installSkillItem(plugin, item, skillsRoot);
+                    installPromises.push(installSkillItem(plugin, item, skillsRoot));
                 }
                 if (group.items.length > 0) {
                     skillPaths.add(skillsRoot);
@@ -341,7 +349,7 @@ async function materializeUserInstallStructure(userRoot: string, plugins: Market
 
             if (group.key === 'agents') {
                 for (const item of group.items) {
-                    await installAgentItem(plugin, item, agentsRoot);
+                    installPromises.push(installAgentItem(plugin, item, agentsRoot));
                 }
                 if (group.items.length > 0) {
                     agentPaths.add(agentsRoot);
@@ -349,6 +357,8 @@ async function materializeUserInstallStructure(userRoot: string, plugins: Market
             }
         }
     }
+
+    await Promise.all(installPromises);
 
     return {
         skillPaths: Array.from(skillPaths),

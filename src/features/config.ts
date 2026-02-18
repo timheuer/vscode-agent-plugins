@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-export const CONFIG_SECTION = 'vscodeAgentPlugins';
+export const CONFIG_SECTION = 'agentPlugins';
 export const MARKETPLACES_KEY = 'marketplaces';
 export const LOG_LEVEL_KEY = 'logLevel';
 

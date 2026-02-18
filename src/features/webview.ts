@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { InstallScope } from './delegation';
 import { MarketplacePlugin } from './marketplace';
+import { getNonce } from './utils';
 
 export interface MarketplaceViewModel {
   plugins: MarketplacePlugin[];
@@ -38,15 +39,6 @@ export function toWebviewData(viewModel: MarketplaceViewModel): Record<string, u
       groups: plugin.groups
     }))
   };
-}
-
-function getNonce(): string {
-  const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let nonce = '';
-  for (let index = 0; index < 32; index += 1) {
-    nonce += charset.charAt(Math.floor(Math.random() * charset.length));
-  }
-  return nonce;
 }
 
 export function createPluginKeyMap(plugins: MarketplacePlugin[]): Map<string, MarketplacePlugin> {

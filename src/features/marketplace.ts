@@ -1,3 +1,6 @@
+import { fetchWithGitHubAuth } from './github-auth';
+import { getLogger } from './logger';
+
 export interface MarketplacePlugin {
 	id: string;
 	name: string;
@@ -94,8 +97,11 @@ function candidateMarketplaceUrls(inputUrl: string): string[] {
 					candidates.add(`https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${remainder}`);
 					return Array.from(candidates);
 				} else {
+					// Try .claude-plugin first, then fall back to .github/plugin
 					candidates.add(`https://raw.githubusercontent.com/${owner}/${repo}/main/.claude-plugin/marketplace.json`);
 					candidates.add(`https://raw.githubusercontent.com/${owner}/${repo}/master/.claude-plugin/marketplace.json`);
+					candidates.add(`https://raw.githubusercontent.com/${owner}/${repo}/main/.github/plugin/marketplace.json`);
+					candidates.add(`https://raw.githubusercontent.com/${owner}/${repo}/master/.github/plugin/marketplace.json`);
 					return Array.from(candidates);
 				}
 			}
@@ -106,6 +112,7 @@ function candidateMarketplaceUrls(inputUrl: string): string[] {
 		if (!hasFileName && !parsed.pathname.endsWith('/marketplace.json')) {
 			const pathname = parsed.pathname.endsWith('/') ? parsed.pathname : `${parsed.pathname}/`;
 			candidates.add(`${parsed.origin}${pathname}.claude-plugin/marketplace.json`);
+			candidates.add(`${parsed.origin}${pathname}.github/plugin/marketplace.json`);
 		}
 	} catch {
 		candidates.add(inputUrl);
@@ -115,13 +122,37 @@ function candidateMarketplaceUrls(inputUrl: string): string[] {
 	return Array.from(candidates);
 }
 
+function isGitHubUrl(url: string): boolean {
+	try {
+		const parsed = new URL(url);
+		const hostname = parsed.hostname.toLowerCase();
+		return hostname === 'github.com' ||
+			hostname === 'www.github.com' ||
+			hostname === 'raw.githubusercontent.com' ||
+			hostname === 'api.github.com';
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Fetch wrapper that uses GitHub authentication for GitHub URLs.
+ * Falls back to regular fetch for non-GitHub URLs.
+ */
+async function authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
+	if (isGitHubUrl(url)) {
+		return fetchWithGitHubAuth(url, options);
+	}
+	return fetch(url, options);
+}
+
 async function resolveMarketplaceUrl(inputUrl: string): Promise<{ documentUrl?: string; warnings: string[]; errors: string[] }> {
 	const warnings: string[] = [];
 	const candidates = candidateMarketplaceUrls(inputUrl);
 
 	for (const candidate of candidates) {
 		try {
-			const response = await fetch(candidate, { method: 'GET' });
+			const response = await authenticatedFetch(candidate, { method: 'GET' });
 			if (response.ok) {
 				return { documentUrl: candidate, warnings: [], errors: [] };
 			}
@@ -168,7 +199,8 @@ async function listRepoDirectory(repoContext: RepoContext, relativePath: string)
 	const url = `https://api.github.com/repos/${repoContext.owner}/${repoContext.repo}/contents/${encodedPath}?ref=${encodeURIComponent(repoContext.branch)}`;
 
 	try {
-		const response = await fetch(url, {
+		// Use authenticated fetch for GitHub API - required for private repos and SAML/SSO
+		const response = await authenticatedFetch(url, {
 			headers: {
 				'User-Agent': 'vscode-agent-plugins',
 				'Accept': 'application/vnd.github+json'
@@ -394,12 +426,16 @@ async function fetchPluginSourceConfig(sourcePath: string, repoContext: RepoCont
 	const basePath = cleanedSource.length > 0 ? cleanedSource : '';
 	const candidates = [
 		`${repoContext.rawBaseUrl}/${basePath ? `${basePath}/` : ''}.claude-plugin/plugin.json`,
+		`${repoContext.rawBaseUrl}/${basePath ? `${basePath}/` : ''}.github/plugin/plugin.json`,
 		`${repoContext.rawBaseUrl}/${basePath ? `${basePath}/` : ''}plugin.json`
 	];
 
+	getLogger()?.trace(`Fetching plugin config for source="${sourcePath}", trying: ${candidates.join(', ')}`);
+
 	for (const candidate of candidates) {
 		try {
-			const response = await fetch(candidate);
+			const response = await authenticatedFetch(candidate);
+			getLogger()?.trace(`${candidate} => ${response.status}`);
 			if (!response.ok) {
 				continue;
 			}
@@ -407,28 +443,83 @@ async function fetchPluginSourceConfig(sourcePath: string, repoContext: RepoCont
 			const payload = (await response.json()) as unknown;
 			const record = asRecord(payload);
 			if (record) {
+				getLogger()?.trace(`Found plugin config at ${candidate}, keys: ${JSON.stringify(Object.keys(record))}`);
 				return record;
 			}
-		} catch {
+		} catch (err) {
+			getLogger()?.trace(`${candidate} => error: ${err}`);
 			continue;
 		}
 	}
 
+	getLogger()?.trace(`No plugin config found for source="${sourcePath}"`);
 	return undefined;
 }
 
 async function resolveGroupItemsFromConfig(
 	value: unknown,
 	groupKey: string,
-	repoContext: RepoContext
+	repoContext: RepoContext,
+	sourceBasePath?: string
 ): Promise<MarketplaceGroupItem[]> {
+	// Helper to prepend source base path to relative paths
+	const resolvePath = (pathValue: string): string => {
+		if (isHttpUrl(pathValue) || !sourceBasePath) {
+			return pathValue;
+		}
+		const normalizedPath = normalizeRelativePath(pathValue);
+		const normalizedBase = normalizeRelativePath(sourceBasePath).replace(/\/+$/, '');
+		return normalizedBase ? `${normalizedBase}/${normalizedPath}` : normalizedPath;
+	};
+
 	if (typeof value === 'string') {
-		const expanded = await expandGroupDirectoryReference(value, groupKey, repoContext);
+		const resolvedPath = resolvePath(value);
+		const expanded = await expandGroupDirectoryReference(resolvedPath, groupKey, repoContext);
 		if (expanded && expanded.length > 0) {
 			return expanded;
 		}
 
-		return [buildItemFromPath(value, groupKey, repoContext)];
+		return [buildItemFromPath(resolvedPath, groupKey, repoContext)];
+	}
+
+	// Handle array of strings or objects
+	if (Array.isArray(value)) {
+		const items: MarketplaceGroupItem[] = [];
+		for (const entry of value) {
+			if (typeof entry === 'string') {
+				const resolvedPath = resolvePath(entry);
+				const expanded = await expandGroupDirectoryReference(resolvedPath, groupKey, repoContext);
+				if (expanded && expanded.length > 0) {
+					items.push(...expanded);
+				} else {
+					items.push(buildItemFromPath(resolvedPath, groupKey, repoContext));
+				}
+			} else {
+				const record = asRecord(entry);
+				if (record) {
+					const pathValue = asString(record.path) ?? asString(record.source) ?? asString(record.url);
+					if (pathValue) {
+						const resolvedPath = resolvePath(pathValue);
+						const base = buildItemFromPath(resolvedPath, groupKey, repoContext);
+						items.push({
+							...base,
+							name: summaryFromRecord(record) ?? base.name,
+							description: asString(record.description) ?? base.description
+						});
+					} else {
+						const name = summaryFromRecord(record);
+						if (name) {
+							items.push({
+								name,
+								metadataFallbackUrls: [],
+								description: asString(record.description)
+							});
+						}
+					}
+				}
+			}
+		}
+		return items;
 	}
 
 	return toGroupItems(value, groupKey, repoContext);
@@ -438,14 +529,28 @@ async function hydratePluginGroupsFromSource(
 	plugin: MarketplacePlugin,
 	repoContext?: RepoContext
 ): Promise<MarketplacePlugin> {
+	getLogger()?.trace(`hydratePluginGroupsFromSource: plugin="${plugin.name}", groups.length=${plugin.groups.length}, hasRepoContext=${!!repoContext}, source="${plugin.raw.source}"`);
+
 	if (!repoContext || plugin.groups.length > 0) {
+		getLogger()?.trace(`Skipping hydration: repoContext=${!!repoContext}, groups.length=${plugin.groups.length}`);
 		return plugin;
 	}
 
 	const source = asString(plugin.raw.source) ?? './';
 	const sourceConfig = await fetchPluginSourceConfig(source, repoContext);
+
+	// Source base path for resolving relative paths within the plugin
+	const sourceBasePath = normalizeRelativePath(source).replace(/\/+$/, '');
+
+	// If no config found, still try auto-discovery of standard directories
 	if (!sourceConfig) {
-		return plugin;
+		getLogger()?.trace(`No sourceConfig found for "${plugin.name}", trying auto-discovery`);
+	}
+
+	// Check both top-level and manifest-wrapped values (like extractPluginGroups does)
+	const manifest = sourceConfig ? asRecord(sourceConfig.manifest) : undefined;
+	if (sourceConfig) {
+		getLogger()?.trace(`sourceConfig keys for "${plugin.name}": ${JSON.stringify(Object.keys(sourceConfig))}, manifest keys: ${manifest ? JSON.stringify(Object.keys(manifest)) : 'none'}`);
 	}
 
 	const groupDefinitions = [
@@ -459,12 +564,26 @@ async function hydratePluginGroupsFromSource(
 
 	const hydratedGroups: MarketplacePluginGroup[] = [];
 	for (const definition of groupDefinitions) {
-		const groupValue = sourceConfig[definition.key];
+		// Check top-level first, then manifest (if sourceConfig exists)
+		const groupValue = sourceConfig?.[definition.key] ?? manifest?.[definition.key];
+
+		// Auto-discover: if not defined, try convention-based directory (e.g., "skills/", "agents/")
 		if (typeof groupValue === 'undefined') {
+			// Try to discover by checking if the directory exists
+			const conventionPath = sourceBasePath ? `${sourceBasePath}/${definition.key}` : definition.key;
+			const discovered = await expandGroupDirectoryReference(conventionPath, definition.key, repoContext);
+			if (discovered && discovered.length > 0) {
+				getLogger()?.trace(`Auto-discovered ${definition.key}/ directory for "${plugin.name}" at ${conventionPath}`);
+				hydratedGroups.push({
+					name: definition.name,
+					key: definition.key,
+					items: discovered
+				});
+			}
 			continue;
 		}
 
-		const items = await resolveGroupItemsFromConfig(groupValue, definition.key, repoContext);
+		const items = await resolveGroupItemsFromConfig(groupValue, definition.key, repoContext, sourceBasePath);
 		if (items.length > 0) {
 			hydratedGroups.push({
 				name: definition.name,
@@ -473,6 +592,8 @@ async function hydratePluginGroupsFromSource(
 			});
 		}
 	}
+
+	getLogger()?.trace(`hydratedGroups for "${plugin.name}": ${hydratedGroups.map(g => `${g.name}(${g.items.length})`).join(', ')}`);
 
 	if (hydratedGroups.length === 0) {
 		return plugin;
@@ -589,7 +710,7 @@ export async function fetchMarketplace(sourceUrl: string): Promise<MarketplaceFe
 	}
 
 	try {
-		const response = await fetch(resolution.documentUrl);
+		const response = await authenticatedFetch(resolution.documentUrl);
 		if (!response.ok) {
 			return {
 				plugins: [],
@@ -630,11 +751,16 @@ export async function fetchAllMarketplaces(urls: string[]): Promise<MarketplaceF
 		errors: []
 	};
 
-	for (const sourceUrl of urls) {
-		const result = await fetchMarketplace(sourceUrl);
-		aggregate.plugins.push(...result.plugins);
-		aggregate.warnings.push(...result.warnings);
-		aggregate.errors.push(...result.errors);
+	const results = await Promise.allSettled(urls.map(url => fetchMarketplace(url)));
+
+	for (const result of results) {
+		if (result.status === 'fulfilled') {
+			aggregate.plugins.push(...result.value.plugins);
+			aggregate.warnings.push(...result.value.warnings);
+			aggregate.errors.push(...result.value.errors);
+		} else {
+			aggregate.errors.push(`Marketplace fetch failed: ${result.reason}`);
+		}
 	}
 
 	const deduped = new Map<string, MarketplacePlugin>();
@@ -700,7 +826,7 @@ export async function fetchGroupItemDescription(item: MarketplaceGroupItem): Pro
 	const urls = [item.metadataUrl, ...item.metadataFallbackUrls].filter((entry): entry is string => Boolean(entry));
 	for (const url of urls) {
 		try {
-			const response = await fetch(url);
+			const response = await authenticatedFetch(url);
 			if (!response.ok) {
 				continue;
 			}
@@ -715,4 +841,22 @@ export async function fetchGroupItemDescription(item: MarketplaceGroupItem): Pro
 	}
 
 	return undefined;
+}
+
+export async function fetchGroupItemContent(item: MarketplaceGroupItem): Promise<{ content?: string; url?: string }> {
+	const urls = [item.metadataUrl, ...item.metadataFallbackUrls].filter((entry): entry is string => Boolean(entry));
+	for (const url of urls) {
+		try {
+			const response = await authenticatedFetch(url);
+			if (!response.ok) {
+				continue;
+			}
+			const content = await response.text();
+			return { content, url };
+		} catch {
+			continue;
+		}
+	}
+
+	return {};
 }

@@ -24,10 +24,32 @@
   "categories": [
     "Other"
   ],
+  "extensionDependencies": [
+    "vscode.github-authentication"
+  ],
   "activationEvents": [
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agent-plugins",
+          "title": "Agent Plugins",
+          "icon": "resources/marketplace-store.svg"
+        }
+      ]
+    },
+    "views": {
+      "agent-plugins": [
+        {
+          "id": "vscode-agent-plugins.marketplaceExplorer",
+          "name": "Marketplace",
+          "icon": "resources/marketplace-store.svg",
+          "contextualTitle": "Agent Plugins Marketplace"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "vscode-agent-plugins.browseMarketplace",
@@ -35,17 +57,111 @@
       },
       {
         "command": "vscode-agent-plugins.addMarketplaceUrl",
-        "title": "Agent Plugins: Add Marketplace URL"
+        "title": "Agent Plugins: Add Marketplace URL",
+        "icon": "$(add)"
       },
       {
         "command": "vscode-agent-plugins.removeMarketplaceUrl",
         "title": "Agent Plugins: Remove Marketplace URL"
+      },
+      {
+        "command": "vscode-agent-plugins.refreshTreeView",
+        "title": "Agent Plugins: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vscode-agent-plugins.installPlugin",
+        "title": "Install Plugin",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "vscode-agent-plugins.previewItem",
+        "title": "Preview Item"
+      },
+      {
+        "command": "vscode-agent-plugins.collapseNode",
+        "title": "Collapse",
+        "icon": "$(collapse-all)"
+      },
+      {
+        "command": "vscode-agent-plugins.openSettings",
+        "title": "Agent Plugins: Settings",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "vscode-agent-plugins.gitHubSignIn",
+        "title": "Agent Plugins: Sign In to GitHub",
+        "icon": "$(github)"
+      },
+      {
+        "command": "vscode-agent-plugins.gitHubAuthStatus",
+        "title": "Agent Plugins: GitHub Auth Status"
+      },
+      {
+        "command": "vscode-agent-plugins.openMarketplaceRepo",
+        "title": "Open Repository",
+        "icon": "$(github)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "vscode-agent-plugins.refreshTreeView",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "vscode-agent-plugins.addMarketplaceUrl",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "vscode-agent-plugins.openSettings",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "vscode-agent-plugins.gitHubSignIn",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "vscode-agent-plugins.browseMarketplace",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "vscode-agent-plugins.openMarketplaceRepo",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem == marketplace-github",
+          "group": "inline@1"
+        },
+        {
+          "command": "vscode-agent-plugins.installPlugin",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem == plugin",
+          "group": "inline"
+        },
+        {
+          "command": "vscode-agent-plugins.collapseNode",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem =~ /marketplace|plugin|group/",
+          "group": "inline@99"
+        },
+        {
+          "command": "vscode-agent-plugins.installPlugin",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem == plugin",
+          "group": "1_install"
+        },
+        {
+          "command": "vscode-agent-plugins.collapseNode",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem =~ /marketplace|plugin|group/",
+          "group": "2_navigation"
+        }
+      ]
+    },
     "configuration": {
       "title": "Agent Plugins",
       "properties": {
-        "vscodeAgentPlugins.marketplaces": {
+        "agentPlugins.marketplaces": {
           "type": "array",
           "default": [ ],
           "description": "List of marketplace.json URLs to browse for agent plugins.",
@@ -54,7 +170,7 @@
             "pattern": "^https?://"
           }
         },
-        "vscodeAgentPlugins.logLevel": {
+        "agentPlugins.logLevel": {
           "type": "string",
           "enum": [
             "off",
