@@ -2,6 +2,8 @@
 
 Browse one or more AI agent plugin marketplaces (each URL points to `marketplace.json`), select plugins, and install/update them directly.
 
+![preview](https://github.com/user-attachments/assets/84f5986c-02cc-4edb-b7b5-5398439a96df)
+
 ## Features
 
 - Webview browser built with `vscode-elements`.
