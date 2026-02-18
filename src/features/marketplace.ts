@@ -1,5 +1,11 @@
 import { fetchWithGitHubAuth } from './github-auth';
 import { getLogger } from './logger';
+import { getCache, CacheKeys, MarketplaceCache } from './cache';
+import * as vscode from 'vscode';
+
+// Event emitter for cache updates (allows UI to refresh when background fetch completes)
+const _onCacheUpdated = new vscode.EventEmitter<string[]>();
+export const onMarketplaceCacheUpdated = _onCacheUpdated.event;
 
 export interface MarketplacePlugin {
 	id: string;
@@ -195,6 +201,17 @@ function encodePath(pathValue: string): string {
 }
 
 async function listRepoDirectory(repoContext: RepoContext, relativePath: string): Promise<RepoContentEntry[] | undefined> {
+	const cache = getCache();
+	const cacheKey = CacheKeys.repoDirectory(repoContext.owner, repoContext.repo, repoContext.branch, relativePath);
+
+	// Check cache first
+	if (cache) {
+		const cached = cache.get<RepoContentEntry[] | undefined>(cacheKey);
+		if (cached?.isFresh) {
+			return cached.data;
+		}
+	}
+
 	const encodedPath = encodePath(relativePath);
 	const url = `https://api.github.com/repos/${repoContext.owner}/${repoContext.repo}/contents/${encodedPath}?ref=${encodeURIComponent(repoContext.branch)}`;
 
@@ -208,15 +225,19 @@ async function listRepoDirectory(repoContext: RepoContext, relativePath: string)
 		});
 
 		if (!response.ok) {
+			cache?.set(cacheKey, undefined);
 			return undefined;
 		}
 
 		const payload = (await response.json()) as unknown;
 		if (!Array.isArray(payload)) {
+			cache?.set(cacheKey, undefined);
 			return undefined;
 		}
 
-		return payload.filter((entry): entry is RepoContentEntry => Boolean(asRecord(entry)));
+		const entries = payload.filter((entry): entry is RepoContentEntry => Boolean(asRecord(entry)));
+		cache?.set(cacheKey, entries);
+		return entries;
 	} catch {
 		return undefined;
 	}
@@ -760,7 +781,7 @@ export async function fetchMarketplace(sourceUrl: string): Promise<MarketplaceFe
 	}
 }
 
-export async function fetchAllMarketplaces(urls: string[]): Promise<MarketplaceFetchResult> {
+async function fetchAllMarketplacesCore(urls: string[]): Promise<MarketplaceFetchResult> {
 	const aggregate: MarketplaceFetchResult = {
 		plugins: [],
 		warnings: [],
@@ -789,6 +810,92 @@ export async function fetchAllMarketplaces(urls: string[]): Promise<MarketplaceF
 
 	aggregate.plugins = Array.from(deduped.values()).sort((left, right) => left.name.localeCompare(right.name));
 	return aggregate;
+}
+
+export interface FetchAllMarketplacesOptions {
+	/** Force a fresh fetch, bypassing cache */
+	forceRefresh?: boolean;
+	/** Callback when background refresh completes */
+	onRefreshComplete?: (result: MarketplaceFetchResult) => void;
+}
+
+export async function fetchAllMarketplaces(
+	urls: string[],
+	options?: FetchAllMarketplacesOptions
+): Promise<MarketplaceFetchResult & { fromCache?: boolean; refreshing?: boolean }> {
+	const cache = getCache();
+	const cacheKey = CacheKeys.allMarketplaces(urls);
+
+	if (!cache) {
+		// No cache available, fetch directly
+		return fetchAllMarketplacesCore(urls);
+	}
+
+	const fetcher = () => fetchAllMarketplacesCore(urls);
+
+	try {
+		const result = await cache.getWithRefresh(cacheKey, fetcher, {
+			forceRefresh: options?.forceRefresh
+		});
+
+		// If refreshing in background and callback provided, wait and notify
+		if (result.refreshing && options?.onRefreshComplete) {
+			cache.waitForRefresh(cacheKey).then(() => {
+				const updated = cache.get<MarketplaceFetchResult>(cacheKey);
+				if (updated) {
+					options.onRefreshComplete!(updated.data);
+					_onCacheUpdated.fire(urls);
+				}
+			}).catch(() => {
+				// Ignore background refresh errors
+			});
+		}
+
+		return {
+			...result.data,
+			fromCache: result.fromCache,
+			refreshing: result.refreshing
+		};
+	} catch (error) {
+		getLogger()?.error(`Failed to fetch marketplaces: ${error}`);
+		return {
+			plugins: [],
+			warnings: [],
+			errors: [`Failed to fetch marketplaces: ${error instanceof Error ? error.message : String(error)}`]
+		};
+	}
+}
+
+/**
+ * Prefetch marketplace data into cache without blocking.
+ * Call this on extension activation to warm the cache.
+ */
+export function prefetchMarketplaces(urls: string[]): void {
+	const cache = getCache();
+	if (!cache || urls.length === 0) {
+		return;
+	}
+
+	const cacheKey = CacheKeys.allMarketplaces(urls);
+	const cached = cache.get<MarketplaceFetchResult>(cacheKey);
+
+	if (!cached) {
+		// No cache, start background fetch
+		getLogger()?.trace('Prefetching marketplace data...');
+		cache.refreshInBackground(cacheKey, () => fetchAllMarketplacesCore(urls));
+	} else if (!cached.isFresh) {
+		// Stale cache, refresh in background
+		getLogger()?.trace('Refreshing stale marketplace cache...');
+		cache.refreshInBackground(cacheKey, () => fetchAllMarketplacesCore(urls));
+	}
+}
+
+/**
+ * Clear marketplace cache. Call when user explicitly requests refresh.
+ */
+export function clearMarketplaceCache(): void {
+	getLogger()?.trace('Clearing all marketplace cache entries');
+	getCache()?.clearAll();
 }
 
 function extractDescriptorSummary(markdown: string): string | undefined {

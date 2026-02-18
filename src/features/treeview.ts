@@ -56,6 +56,7 @@ export class MarketplaceTreeDataProvider implements vscode.TreeDataProvider<Tree
 
     private _marketplaces: MarketplaceNode[] = [];
     private _loading = false;
+    private _refreshingInBackground = false;
 
     constructor(private readonly services: ExtensionServices) { }
 
@@ -80,28 +81,42 @@ export class MarketplaceTreeDataProvider implements vscode.TreeDataProvider<Tree
                         return;
                     }
 
-                    const result = await fetchAllMarketplaces(urls);
+                    const result = await fetchAllMarketplaces(urls, {
+                        onRefreshComplete: (updated) => {
+                            this._refreshingInBackground = false;
+                            this.updateMarketplacesFromResult(updated, urls);
+                            this.services.logger.info(`Background refresh completed with ${updated.plugins.length} plugin(s).`);
+                        }
+                    });
 
-                    const marketplaceMap = new Map<string, MarketplacePlugin[]>();
-                    for (const plugin of result.plugins) {
-                        const existing = marketplaceMap.get(plugin.sourceUrl) ?? [];
-                        existing.push(plugin);
-                        marketplaceMap.set(plugin.sourceUrl, existing);
-                    }
+                    this._refreshingInBackground = result.refreshing ?? false;
+                    this.updateMarketplacesFromResult(result, urls);
 
-                    this._marketplaces = urls.map((url) => ({
-                        type: 'marketplace' as const,
-                        url,
-                        plugins: marketplaceMap.get(url) ?? []
-                    }));
-
-                    this.services.logger.info(`Tree view loaded ${result.plugins.length} plugin(s) from ${urls.length} marketplace(s).`);
-                    this._onDidChangeTreeData.fire();
+                    const cacheNote = result.fromCache ? ' (cached)' : '';
+                    const refreshNote = result.refreshing ? ' - refreshing in background' : '';
+                    this.services.logger.info(`Tree view loaded ${result.plugins.length} plugin(s) from ${urls.length} marketplace(s)${cacheNote}${refreshNote}.`);
                 }
             );
         } finally {
             this._loading = false;
         }
+    }
+
+    private updateMarketplacesFromResult(result: { plugins: MarketplacePlugin[] }, urls: string[]): void {
+        const marketplaceMap = new Map<string, MarketplacePlugin[]>();
+        for (const plugin of result.plugins) {
+            const existing = marketplaceMap.get(plugin.sourceUrl) ?? [];
+            existing.push(plugin);
+            marketplaceMap.set(plugin.sourceUrl, existing);
+        }
+
+        this._marketplaces = urls.map((url) => ({
+            type: 'marketplace' as const,
+            url,
+            plugins: marketplaceMap.get(url) ?? []
+        }));
+
+        this._onDidChangeTreeData.fire();
     }
 
     getTreeItem(element: TreeNode): vscode.TreeItem {

@@ -19,6 +19,7 @@ import {
     fetchAllMarketplaces,
     fetchGroupItemDescription,
     fetchGroupItemContent,
+    clearMarketplaceCache,
     type MarketplacePlugin,
     type MarketplaceGroupItem
 } from './marketplace';
@@ -33,7 +34,10 @@ import {
 import type { ItemNode, MarketplacePlugin as TreePluginType } from './treeview';
 import { signInToGitHub, isSignedInToGitHub } from './github-auth';
 
-async function loadMarketplaceViewModel(logger: ExtensionServices['logger']): Promise<MarketplaceViewModel> {
+async function loadMarketplaceViewModel(
+    logger: ExtensionServices['logger'],
+    options?: { forceRefresh?: boolean }
+): Promise<MarketplaceViewModel & { fromCache?: boolean; refreshing?: boolean }> {
     const urls = getMarketplaceUrls();
     if (urls.length === 0) {
         return {
@@ -44,8 +48,11 @@ async function loadMarketplaceViewModel(logger: ExtensionServices['logger']): Pr
         };
     }
 
-    const result = await fetchAllMarketplaces(urls);
-    logger.info(`Loaded ${result.plugins.length} plugin(s) from ${urls.length} marketplace URL(s).`);
+    const result = await fetchAllMarketplaces(urls, { forceRefresh: options?.forceRefresh });
+    const cacheNote = result.fromCache ? ' (cached)' : '';
+    const refreshNote = result.refreshing ? ' - refreshing in background' : '';
+    logger.info(`Loaded ${result.plugins.length} plugin(s) from ${urls.length} marketplace URL(s)${cacheNote}${refreshNote}.`);
+    
     for (const warning of result.warnings) {
         logger.warn(warning);
     }
@@ -57,7 +64,9 @@ async function loadMarketplaceViewModel(logger: ExtensionServices['logger']): Pr
         marketplaceUrls: urls,
         plugins: result.plugins,
         warnings: result.warnings,
-        errors: result.errors
+        errors: result.errors,
+        fromCache: result.fromCache,
+        refreshing: result.refreshing
     };
 }
 
@@ -174,8 +183,13 @@ export async function browseMarketplace(services: ExtensionServices): Promise<vo
     let viewModel = await loadMarketplaceViewModel(services.logger);
     let pluginKeyMap = createPluginKeyMap(viewModel.plugins);
     const descriptorCache = new Map<string, { description?: string; error?: string; docUrl?: string }>();
-    const refreshPanelState = async (): Promise<void> => {
-        viewModel = await loadMarketplaceViewModel(services.logger);
+    
+    const refreshPanelState = async (forceRefresh = false): Promise<void> => {
+        if (forceRefresh) {
+            services.logger.info('Force refresh requested - clearing marketplace cache');
+            clearMarketplaceCache();
+        }
+        viewModel = await loadMarketplaceViewModel(services.logger, { forceRefresh });
         pluginKeyMap = createPluginKeyMap(viewModel.plugins);
         descriptorCache.clear();
         await panel.webview.postMessage({
@@ -218,7 +232,7 @@ export async function browseMarketplace(services: ExtensionServices): Promise<vo
             }
 
             if (message.type === 'refresh') {
-                await refreshPanelState();
+                await refreshPanelState(true); // Force refresh when user clicks refresh
                 return;
             }
 

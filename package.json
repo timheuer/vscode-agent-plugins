@@ -70,6 +70,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "vscode-agent-plugins.forceRefreshTreeView",
+        "title": "Agent Plugins: Force Refresh (Clear Cache)",
+        "icon": "$(sync)"
+      },
+      {
         "command": "vscode-agent-plugins.installPlugin",
         "title": "Install Plugin",
         "icon": "$(cloud-download)"

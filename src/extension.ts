@@ -9,10 +9,12 @@ import {
 	gitHubSignIn,
 	gitHubAuthStatus
 } from './features/commands';
-import { CONFIG_SECTION, LOG_LEVEL_KEY, MARKETPLACES_KEY } from './features/config';
+import { CONFIG_SECTION, LOG_LEVEL_KEY, MARKETPLACES_KEY, getMarketplaceUrls } from './features/config';
 import { createMarketplaceTreeView, MarketplaceNode } from './features/treeview';
 import { onDidChangeGitHubAuth } from './features/github-auth';
 import { initLogger } from './features/logger';
+import { initializeCache } from './features/cache';
+import { prefetchMarketplaces, onMarketplaceCacheUpdated, clearMarketplaceCache } from './features/marketplace';
 
 export interface ExtensionServices {
 	logger: Logger;
@@ -75,8 +77,25 @@ export function activate(context: vscode.ExtensionContext) {
 	// Initialize shared logger for all modules
 	initLogger(logger);
 
+	// Initialize cache for marketplace data persistence
+	initializeCache(context.globalState);
+
+	// Prefetch marketplace data in background to warm the cache
+	const urls = getMarketplaceUrls();
+	if (urls.length > 0) {
+		prefetchMarketplaces(urls);
+	}
+
 	const { treeView, provider } = createMarketplaceTreeView(services);
 	context.subscriptions.push(treeView);
+
+	// Refresh tree view when background cache refresh completes
+	context.subscriptions.push(
+		onMarketplaceCacheUpdated(() => {
+			logger.trace('Marketplace cache updated, refreshing tree view');
+			provider.refresh();
+		})
+	);
 
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((event) => {
@@ -91,6 +110,11 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('vscode-agent-plugins.addMarketplaceUrl', () => addMarketplaceUrl(services)),
 		vscode.commands.registerCommand('vscode-agent-plugins.removeMarketplaceUrl', () => removeMarketplaceUrl(services)),
 		vscode.commands.registerCommand('vscode-agent-plugins.refreshTreeView', () => provider.loadData()),
+		vscode.commands.registerCommand('vscode-agent-plugins.forceRefreshTreeView', () => {
+			logger.info('Force refresh requested - clearing marketplace cache');
+			clearMarketplaceCache();
+			provider.loadData();
+		}),
 		vscode.commands.registerCommand('vscode-agent-plugins.previewItem', (node) => previewItem(services, node)),
 		vscode.commands.registerCommand('vscode-agent-plugins.installPlugin', (node) => installPluginFromTree(services, node)),
 		vscode.commands.registerCommand('vscode-agent-plugins.gitHubSignIn', () => gitHubSignIn(services)),
