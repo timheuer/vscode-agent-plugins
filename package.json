@@ -36,7 +36,7 @@
         {
           "id": "agent-plugins",
           "title": "Agent Plugins",
-          "icon": "resources/marketplace-store.svg"
+          "icon": "icon.png"
         }
       ]
     },
@@ -45,7 +45,7 @@
         {
           "id": "vscode-agent-plugins.marketplaceExplorer",
           "name": "Marketplace",
-          "icon": "resources/marketplace-store.svg",
+          "icon": "icon.png",
           "contextualTitle": "Agent Plugins Marketplace"
         }
       ]
