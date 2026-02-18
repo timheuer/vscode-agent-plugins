@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { ExtensionServices } from '../extension';
 import {
     fetchAllMarketplaces,
+    FetchProgressEvent,
     MarketplacePlugin,
     MarketplacePluginGroup,
     MarketplaceGroupItem
@@ -81,13 +82,68 @@ export class MarketplaceTreeDataProvider implements vscode.TreeDataProvider<Tree
                         return;
                     }
 
+                    const statusBar = this.services.statusBarItem;
+                    const total = urls.length;
+
+                    const getMarketplaceLabel = (url: string): string => {
+                        try {
+                            const parsed = new URL(url);
+                            // Extract owner/repo from GitHub URLs
+                            const pathMatch = /^\/([^/]+\/[^/]+)/.exec(parsed.pathname);
+                            if (pathMatch) {
+                                return pathMatch[1];
+                            }
+                            return parsed.hostname + parsed.pathname.slice(0, 30);
+                        } catch {
+                            return url.slice(0, 40);
+                        }
+                    };
+
+                    statusBar.text = `$(loading~spin) Fetching ${total} marketplace(s)...`;
+                    statusBar.tooltip = 'Agent Plugins: Fetching marketplaces';
+                    statusBar.show();
+                    this.services.logger.info('Status bar shown: Fetching marketplaces...');
+
+                    // Track in-progress fetches
+                    const inProgress = new Set(urls.map(getMarketplaceLabel));
+                    let completedCount = 0;
+
+                    const updateStatusBar = (): void => {
+                        const labels = Array.from(inProgress);
+                        if (labels.length > 0) {
+                            const current = labels[0];
+                            statusBar.text = `$(loading~spin) Fetching ${current} (${completedCount + 1}/${total})`;
+                            statusBar.tooltip = `Agent Plugins: Fetching ${labels.join(', ')}`;
+                        }
+                    };
+
+                    updateStatusBar();
+
+                    const onProgress = (event: FetchProgressEvent): void => {
+                        const urlLabel = getMarketplaceLabel(event.url);
+                        if (event.status === 'completed' || event.status === 'failed') {
+                            completedCount++;
+                            inProgress.delete(urlLabel);
+                            this.services.logger.info(`Progress: ${event.status} ${urlLabel} (${completedCount}/${total})`);
+                            updateStatusBar();
+                        }
+                    };
+
                     const result = await fetchAllMarketplaces(urls, {
+                        onProgress,
                         onRefreshComplete: (updated) => {
                             this._refreshingInBackground = false;
                             this.updateMarketplacesFromResult(updated, urls);
                             this.services.logger.info(`Background refresh completed with ${updated.plugins.length} plugin(s).`);
                         }
                     });
+
+                    if (result.fromCache) {
+                        statusBar.text = `$(check) Loaded ${result.plugins.length} plugin(s) from cache`;
+                    } else {
+                        statusBar.text = `$(check) Loaded ${result.plugins.length} plugin(s)`;
+                    }
+                    setTimeout(() => statusBar.hide(), 3000);
 
                     this._refreshingInBackground = result.refreshing ?? false;
                     this.updateMarketplacesFromResult(result, urls);

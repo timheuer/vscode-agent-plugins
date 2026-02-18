@@ -52,7 +52,7 @@ async function loadMarketplaceViewModel(
     const cacheNote = result.fromCache ? ' (cached)' : '';
     const refreshNote = result.refreshing ? ' - refreshing in background' : '';
     logger.info(`Loaded ${result.plugins.length} plugin(s) from ${urls.length} marketplace URL(s)${cacheNote}${refreshNote}.`);
-    
+
     for (const warning of result.warnings) {
         logger.warn(warning);
     }
@@ -183,7 +183,7 @@ export async function browseMarketplace(services: ExtensionServices): Promise<vo
     let viewModel = await loadMarketplaceViewModel(services.logger);
     let pluginKeyMap = createPluginKeyMap(viewModel.plugins);
     const descriptorCache = new Map<string, { description?: string; error?: string; docUrl?: string }>();
-    
+
     const refreshPanelState = async (forceRefresh = false): Promise<void> => {
         if (forceRefresh) {
             services.logger.info('Force refresh requested - clearing marketplace cache');

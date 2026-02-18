@@ -19,6 +19,7 @@ import { prefetchMarketplaces, onMarketplaceCacheUpdated, clearMarketplaceCache 
 export interface ExtensionServices {
 	logger: Logger;
 	context: vscode.ExtensionContext;
+	statusBarItem: vscode.StatusBarItem;
 }
 
 /**
@@ -69,9 +70,15 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
+	// Create status bar item for showing marketplace fetch progress
+	const statusBarItem = vscode.window.createStatusBarItem('agentPlugins.status', vscode.StatusBarAlignment.Left, 100);
+	statusBarItem.name = 'Agent Plugins';
+	context.subscriptions.push(statusBarItem);
+
 	const services: ExtensionServices = {
 		logger,
-		context
+		context,
+		statusBarItem
 	};
 
 	// Initialize shared logger for all modules

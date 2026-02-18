@@ -243,6 +243,15 @@ async function listRepoDirectory(repoContext: RepoContext, relativePath: string)
 	}
 }
 
+function primaryDescriptorForGroup(groupKey: string): string | undefined {
+	switch (groupKey) {
+		case 'skills':
+			return 'SKILL.md';
+		default:
+			return undefined;
+	}
+}
+
 async function expandGroupDirectoryReference(
 	referencePath: string,
 	groupKey: string,
@@ -256,6 +265,19 @@ async function expandGroupDirectoryReference(
 	const entries = await listRepoDirectory(repoContext, cleanedPath);
 	if (!entries || entries.length === 0) {
 		return undefined;
+	}
+
+	// Check if this directory contains a primary descriptor file (e.g., SKILL.md for skills).
+	// If so, this is a leaf item directory - don't expand further regardless of other contents
+	// (skills can contain subdirectories like resources/, details.md, etc. per the spec).
+	const primaryDescriptor = primaryDescriptorForGroup(groupKey);
+	if (primaryDescriptor) {
+		const hasPrimaryDescriptor = entries.some(
+			(entry) => entry.type === 'file' && entry.name?.toLowerCase() === primaryDescriptor.toLowerCase()
+		);
+		if (hasPrimaryDescriptor) {
+			return undefined;
+		}
 	}
 
 	const directoryEntries = entries.filter((entry) => entry.type === 'dir' && typeof entry.name === 'string');
@@ -273,18 +295,6 @@ async function expandGroupDirectoryReference(
 		(entry) => entry.type === 'file' && typeof entry.name === 'string' && /\.md$/i.test(entry.name)
 	);
 	if (markdownFiles.length > 0) {
-		// Check if this is a leaf item directory containing only descriptor files (e.g., SKILL.md for skills).
-		// If so, don't expand - let the caller use the directory path as the item name.
-		const descriptorFiles = descriptorDefaultsForGroup(groupKey);
-		const allAreDescriptors = markdownFiles.every(
-			(entry) => descriptorFiles.some((df) => df.toLowerCase() === entry.name?.toLowerCase())
-		);
-		if (allAreDescriptors) {
-			// This is a leaf directory (e.g., "skills/akka-best-practices" containing just SKILL.md)
-			// Return undefined so the caller uses buildItemFromPath with the directory name
-			return undefined;
-		}
-
 		return markdownFiles.map((entry) => {
 			const item = buildItemFromPath(`${cleanedPath}/${entry.name ?? ''}`, groupKey, repoContext);
 			return {
@@ -781,14 +791,32 @@ export async function fetchMarketplace(sourceUrl: string): Promise<MarketplaceFe
 	}
 }
 
-async function fetchAllMarketplacesCore(urls: string[]): Promise<MarketplaceFetchResult> {
+async function fetchAllMarketplacesCore(
+	urls: string[],
+	onProgress?: (event: FetchProgressEvent) => void
+): Promise<MarketplaceFetchResult> {
 	const aggregate: MarketplaceFetchResult = {
 		plugins: [],
 		warnings: [],
 		errors: []
 	};
 
-	const results = await Promise.allSettled(urls.map(url => fetchMarketplace(url)));
+	let completed = 0;
+	const total = urls.length;
+
+	const results = await Promise.allSettled(urls.map(async (url, index) => {
+		onProgress?.({ url, status: 'started', current: index + 1, total });
+		try {
+			const result = await fetchMarketplace(url);
+			completed++;
+			onProgress?.({ url, status: 'completed', current: completed, total });
+			return result;
+		} catch (error) {
+			completed++;
+			onProgress?.({ url, status: 'failed', current: completed, total });
+			throw error;
+		}
+	}));
 
 	for (const result of results) {
 		if (result.status === 'fulfilled') {
@@ -812,11 +840,20 @@ async function fetchAllMarketplacesCore(urls: string[]): Promise<MarketplaceFetc
 	return aggregate;
 }
 
+export interface FetchProgressEvent {
+	url: string;
+	status: 'started' | 'completed' | 'failed';
+	current: number;
+	total: number;
+}
+
 export interface FetchAllMarketplacesOptions {
 	/** Force a fresh fetch, bypassing cache */
 	forceRefresh?: boolean;
 	/** Callback when background refresh completes */
 	onRefreshComplete?: (result: MarketplaceFetchResult) => void;
+	/** Progress callback for each marketplace fetch */
+	onProgress?: (event: FetchProgressEvent) => void;
 }
 
 export async function fetchAllMarketplaces(
@@ -828,10 +865,10 @@ export async function fetchAllMarketplaces(
 
 	if (!cache) {
 		// No cache available, fetch directly
-		return fetchAllMarketplacesCore(urls);
+		return fetchAllMarketplacesCore(urls, options?.onProgress);
 	}
 
-	const fetcher = () => fetchAllMarketplacesCore(urls);
+	const fetcher = () => fetchAllMarketplacesCore(urls, options?.onProgress);
 
 	try {
 		const result = await cache.getWithRefresh(cacheKey, fetcher, {

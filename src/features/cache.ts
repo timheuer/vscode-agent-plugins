@@ -233,7 +233,7 @@ export function getCache(): MarketplaceCache | undefined {
 export const CacheKeys = {
     marketplace: (url: string) => `marketplace:${url}`,
     allMarketplaces: (urls: string[]) => `marketplaces:${urls.sort().join('|')}`,
-    repoDirectory: (owner: string, repo: string, branch: string, path: string) => 
+    repoDirectory: (owner: string, repo: string, branch: string, path: string) =>
         `dir:${owner}/${repo}/${branch}:${path}`,
     pluginConfig: (owner: string, repo: string, branch: string, source: string) =>
         `config:${owner}/${repo}/${branch}:${source}`
