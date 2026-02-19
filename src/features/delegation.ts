@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { MarketplaceGroupItem, MarketplacePlugin } from './marketplace';
+import { fetchWithGitHubAuth } from './github-auth';
 
 export type InstallScope = 'workspace' | 'user';
 
@@ -48,8 +49,12 @@ interface GitHubContentEntry {
 function sanitizePathSegment(value: string): string {
     const sanitized = value
         .toLowerCase()
-        .replace(/[^a-z0-9._-]+/g, '-')
+        .replace(/[^a-z0-9_-]+/g, '-')
         .replace(/^-+|-+$/g, '');
+
+    if (sanitized === '..' || sanitized === '.') {
+        return 'unknown';
+    }
 
     return sanitized.length > 0 ? sanitized : 'unknown';
 }
@@ -117,7 +122,7 @@ async function fetchGitHubPathContents(repoContext: RepoContext, relativePath: s
     const url = `https://api.github.com/repos/${repoContext.owner}/${repoContext.repo}/contents/${encoded}?ref=${encodeURIComponent(repoContext.branch)}`;
 
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithGitHubAuth(url, {
             headers: {
                 'User-Agent': 'vscode-agent-plugins',
                 'Accept': 'application/vnd.github+json'
@@ -135,7 +140,7 @@ async function fetchGitHubPathContents(repoContext: RepoContext, relativePath: s
 
 async function downloadRawFile(rawUrl: string, targetPath: string, logger?: { warn: (msg: string) => void }): Promise<boolean> {
     try {
-        const response = await fetch(rawUrl);
+        const response = await fetchWithGitHubAuth(rawUrl);
         if (!response.ok) {
             logger?.warn(`Failed to download ${rawUrl}: ${response.status} ${response.statusText}`);
             return false;
@@ -153,7 +158,7 @@ async function downloadRawFile(rawUrl: string, targetPath: string, logger?: { wa
 
 async function fetchRawText(rawUrl: string): Promise<string | undefined> {
     try {
-        const response = await fetch(rawUrl);
+        const response = await fetchWithGitHubAuth(rawUrl);
         if (!response.ok) {
             return undefined;
         }
