@@ -187,6 +187,13 @@
           ],
           "default": "info",
           "description": "Log level for extension output channel logging."
+        },
+        "agentPlugins.cacheDuration": {
+          "type": "number",
+          "default": 7,
+          "minimum": 1,
+          "maximum": 30,
+          "description": "How long marketplace data is cached before refreshing (in days)."
         }
       }
     }

@@ -9,7 +9,7 @@ import {
 	gitHubSignIn,
 	gitHubAuthStatus
 } from './features/commands';
-import { CONFIG_SECTION, LOG_LEVEL_KEY, MARKETPLACES_KEY, getMarketplaceUrls } from './features/config';
+import { CONFIG_SECTION, LOG_LEVEL_KEY, MARKETPLACES_KEY, CACHE_DURATION_KEY, getMarketplaceUrls, getCacheDurationDays } from './features/config';
 import { createMarketplaceTreeView, MarketplaceNode } from './features/treeview';
 import { onDidChangeGitHubAuth } from './features/github-auth';
 import { initLogger } from './features/logger';
@@ -85,7 +85,11 @@ export function activate(context: vscode.ExtensionContext) {
 	initLogger(logger);
 
 	// Initialize cache for marketplace data persistence
-	initializeCache(context.globalState);
+	const cacheDurationMs = getCacheDurationDays() * 24 * 60 * 60 * 1000;
+	initializeCache(context.globalState, {
+		freshTTL: cacheDurationMs,
+		staleTTL: cacheDurationMs  // Same as fresh - no stale window, just refresh when expired
+	});
 
 	// Prefetch marketplace data in background to warm the cache
 	const urls = getMarketplaceUrls();

@@ -3,6 +3,14 @@ import * as vscode from 'vscode';
 export const CONFIG_SECTION = 'agentPlugins';
 export const MARKETPLACES_KEY = 'marketplaces';
 export const LOG_LEVEL_KEY = 'logLevel';
+export const CACHE_DURATION_KEY = 'cacheDuration';
+
+/**
+ * Get cache duration in days (default: 7 days).
+ */
+export function getCacheDurationDays(): number {
+    return vscode.workspace.getConfiguration(CONFIG_SECTION).get<number>(CACHE_DURATION_KEY, 7);
+}
 
 function normalizeUrls(urls: string[] | undefined): string[] {
     if (!urls) {
