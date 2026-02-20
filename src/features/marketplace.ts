@@ -162,8 +162,10 @@ async function resolveMarketplaceUrl(inputUrl: string): Promise<{ documentUrl?: 
 			if (response.ok) {
 				return { documentUrl: candidate, warnings: [], errors: [] };
 			}
+			getLogger()?.trace(`Marketplace candidate failed (${response.status} ${response.statusText}): ${candidate}`);
 			warnings.push(`Marketplace candidate failed (${response.status}): ${candidate}`);
 		} catch (error) {
+			getLogger()?.trace(`Marketplace candidate unreachable: ${candidate} - ${error instanceof Error ? error.message : String(error)}`);
 			warnings.push(`Marketplace candidate unreachable: ${candidate} (${error instanceof Error ? error.message : String(error)})`);
 		}
 	}
@@ -225,6 +227,7 @@ async function listRepoDirectory(repoContext: RepoContext, relativePath: string)
 		});
 
 		if (!response.ok) {
+			getLogger()?.trace(`GitHub API returned ${response.status} ${response.statusText} for ${url}`);
 			cache?.set(cacheKey, undefined);
 			return undefined;
 		}
@@ -238,7 +241,8 @@ async function listRepoDirectory(repoContext: RepoContext, relativePath: string)
 		const entries = payload.filter((entry): entry is RepoContentEntry => Boolean(asRecord(entry)));
 		cache?.set(cacheKey, entries);
 		return entries;
-	} catch {
+	} catch (error) {
+		getLogger()?.trace(`Failed to list repo directory ${relativePath}: ${error instanceof Error ? error.message : String(error)}`);
 		return undefined;
 	}
 }
@@ -363,9 +367,17 @@ function buildItemFromPath(pathValue: string, groupKey: string, repoContext?: Re
 	};
 }
 
-function buildGroupItem(entry: unknown, groupKey: string, repoContext?: RepoContext): MarketplaceGroupItem | undefined {
+function buildGroupItem(entry: unknown, groupKey: string, repoContext?: RepoContext, sourceBasePath?: string): MarketplaceGroupItem | undefined {
+	const resolvePath = (pathValue: string): string => {
+		if (isHttpUrl(pathValue) || !sourceBasePath) {
+			return pathValue;
+		}
+		const normalizedPath = normalizeRelativePath(pathValue);
+		return `${sourceBasePath}/${normalizedPath}`;
+	};
+
 	if (typeof entry === 'string') {
-		return buildItemFromPath(entry, groupKey, repoContext);
+		return buildItemFromPath(resolvePath(entry), groupKey, repoContext);
 	}
 
 	const record = asRecord(entry);
@@ -375,7 +387,7 @@ function buildGroupItem(entry: unknown, groupKey: string, repoContext?: RepoCont
 
 	const pathValue = asString(record.path) ?? asString(record.source) ?? asString(record.url);
 	if (pathValue) {
-		const base = buildItemFromPath(pathValue, groupKey, repoContext);
+		const base = buildItemFromPath(resolvePath(pathValue), groupKey, repoContext);
 		return {
 			...base,
 			name: summaryFromRecord(record) ?? base.name,
@@ -395,10 +407,10 @@ function buildGroupItem(entry: unknown, groupKey: string, repoContext?: RepoCont
 	};
 }
 
-function toGroupItems(value: unknown, groupKey: string, repoContext?: RepoContext): MarketplaceGroupItem[] {
+function toGroupItems(value: unknown, groupKey: string, repoContext?: RepoContext, sourceBasePath?: string): MarketplaceGroupItem[] {
 	if (Array.isArray(value)) {
 		return value
-			.map((entry) => buildGroupItem(entry, groupKey, repoContext))
+			.map((entry) => buildGroupItem(entry, groupKey, repoContext, sourceBasePath))
 			.filter((entry): entry is MarketplaceGroupItem => Boolean(entry));
 	}
 
@@ -409,7 +421,7 @@ function toGroupItems(value: unknown, groupKey: string, repoContext?: RepoContex
 
 	const items: MarketplaceGroupItem[] = [];
 	for (const [key, entryValue] of Object.entries(record)) {
-		const item = buildGroupItem(entryValue, groupKey, repoContext);
+		const item = buildGroupItem(entryValue, groupKey, repoContext, sourceBasePath);
 		if (item) {
 			items.push(item);
 			continue;
@@ -436,14 +448,14 @@ function mergeGroupItems(primary: MarketplaceGroupItem[], secondary: Marketplace
 	return Array.from(deduped.values());
 }
 
-function collectGroupValues(record: UnknownRecord, key: string, repoContext?: RepoContext): MarketplaceGroupItem[] {
+function collectGroupValues(record: UnknownRecord, key: string, repoContext?: RepoContext, sourceBasePath?: string): MarketplaceGroupItem[] {
 	const manifest = asRecord(record.manifest);
-	const primary = toGroupItems(record[key], key, repoContext);
-	const secondary = toGroupItems(manifest?.[key], key, repoContext);
+	const primary = toGroupItems(record[key], key, repoContext, sourceBasePath);
+	const secondary = toGroupItems(manifest?.[key], key, repoContext, sourceBasePath);
 	return mergeGroupItems(primary, secondary);
 }
 
-function extractPluginGroups(record: UnknownRecord, repoContext?: RepoContext): MarketplacePluginGroup[] {
+function extractPluginGroups(record: UnknownRecord, repoContext?: RepoContext, sourceBasePath?: string): MarketplacePluginGroup[] {
 	const groupDefinitions = [
 		{ key: 'skills', name: 'Skills' },
 		{ key: 'agents', name: 'Agents' },
@@ -455,7 +467,7 @@ function extractPluginGroups(record: UnknownRecord, repoContext?: RepoContext): 
 
 	const groups: MarketplacePluginGroup[] = [];
 	for (const definition of groupDefinitions) {
-		const items = collectGroupValues(record, definition.key, repoContext);
+		const items = collectGroupValues(record, definition.key, repoContext, sourceBasePath);
 		if (items.length > 0) {
 			groups.push({
 				name: definition.name,
@@ -698,7 +710,9 @@ function normalizePlugin(
 		'unknown';
 	const downloadUrl =
 		asString(record.downloadUrl) ?? asString(record.url) ?? asString(asRecord(record.package)?.url);
-	const groups = extractPluginGroups(record, repoContext);
+	const source = asString(record.source);
+	const sourceBasePath = source ? normalizeRelativePath(source).replace(/\/+$/, '') : undefined;
+	const groups = extractPluginGroups(record, repoContext, sourceBasePath);
 
 	return {
 		plugin: {
@@ -988,6 +1002,7 @@ export async function fetchGroupItemDescription(item: MarketplaceGroupItem): Pro
 		try {
 			const response = await authenticatedFetch(url);
 			if (!response.ok) {
+				getLogger()?.trace(`Fetch returned ${response.status} ${response.statusText} for ${url}`);
 				continue;
 			}
 			const content = await response.text();
@@ -1009,6 +1024,7 @@ export async function fetchGroupItemContent(item: MarketplaceGroupItem): Promise
 		try {
 			const response = await authenticatedFetch(url);
 			if (!response.ok) {
+				getLogger()?.trace(`Fetch returned ${response.status} ${response.statusText} for ${url}`);
 				continue;
 			}
 			const content = await response.text();

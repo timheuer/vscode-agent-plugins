@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { getLogger } from './logger';
 
 const GITHUB_AUTH_PROVIDER_ID = 'github';
 
@@ -26,6 +27,7 @@ export async function getGitHubSession(createIfNone: boolean = false): Promise<v
         return session;
     } catch (error) {
         // User cancelled or auth failed
+        getLogger()?.trace(`GitHub auth failed or cancelled: ${error instanceof Error ? error.message : String(error)}`);
         cachedSession = undefined;
         return undefined;
     }
@@ -71,6 +73,7 @@ export async function getGitHubAuthHeaders(): Promise<Record<string, string>> {
             'Authorization': `Bearer ${session.accessToken}`
         };
     }
+    getLogger()?.trace('No GitHub session available, making unauthenticated request');
     return {};
 }
 

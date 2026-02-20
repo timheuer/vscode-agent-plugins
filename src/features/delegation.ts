@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { MarketplaceGroupItem, MarketplacePlugin } from './marketplace';
 import { fetchWithGitHubAuth } from './github-auth';
+import { getLogger } from './logger';
 
 export type InstallScope = 'workspace' | 'user';
 
@@ -129,11 +130,13 @@ async function fetchGitHubPathContents(repoContext: RepoContext, relativePath: s
             }
         });
         if (!response.ok) {
+            getLogger()?.trace(`GitHub API returned ${response.status} ${response.statusText} for ${url}`);
             return undefined;
         }
 
         return (await response.json()) as unknown;
-    } catch {
+    } catch (error) {
+        getLogger()?.trace(`Failed to fetch GitHub path contents for ${url}: ${error instanceof Error ? error.message : String(error)}`);
         return undefined;
     }
 }
@@ -160,10 +163,12 @@ async function fetchRawText(rawUrl: string): Promise<string | undefined> {
     try {
         const response = await fetchWithGitHubAuth(rawUrl);
         if (!response.ok) {
+            getLogger()?.trace(`Fetch returned ${response.status} ${response.statusText} for ${rawUrl}`);
             return undefined;
         }
         return await response.text();
-    } catch {
+    } catch (error) {
+        getLogger()?.trace(`Failed to fetch raw text from ${rawUrl}: ${error instanceof Error ? error.message : String(error)}`);
         return undefined;
     }
 }
