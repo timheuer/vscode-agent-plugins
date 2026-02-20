@@ -160,6 +160,11 @@
           "command": "vscode-agent-plugins.removeMarketplaceFromTree",
           "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem =~ /^marketplace/",
           "group": "2_remove"
+        },
+        {
+          "command": "vscode-agent-plugins.collapseNode",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem =~ /^marketplace/",
+          "group": "3_collapse"
         }
       ]
     },
