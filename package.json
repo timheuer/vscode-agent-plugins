@@ -163,8 +163,8 @@
         },
         {
           "command": "vscode-agent-plugins.collapseNode",
-          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem =~ /^marketplace/",
-          "group": "3_collapse"
+          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem =~ /^(marketplace|marketplace-github|plugin|group)$/",
+          "group": "inline@2"
         }
       ]
     },
