@@ -65,6 +65,11 @@
         "title": "Agent Plugins: Remove Marketplace URL"
       },
       {
+        "command": "vscode-agent-plugins.removeMarketplaceFromTree",
+        "title": "Remove",
+        "icon": "$(trash)"
+      },
+      {
         "command": "vscode-agent-plugins.refreshTreeView",
         "title": "Agent Plugins: Refresh",
         "icon": "$(refresh)"
@@ -147,19 +152,14 @@
           "group": "inline"
         },
         {
-          "command": "vscode-agent-plugins.collapseNode",
-          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem =~ /marketplace|plugin|group/",
-          "group": "inline@99"
-        },
-        {
           "command": "vscode-agent-plugins.installPlugin",
           "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem == plugin",
           "group": "1_install"
         },
         {
-          "command": "vscode-agent-plugins.collapseNode",
-          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem =~ /marketplace|plugin|group/",
-          "group": "2_navigation"
+          "command": "vscode-agent-plugins.removeMarketplaceFromTree",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem =~ /^marketplace/",
+          "group": "2_remove"
         }
       ]
     },

@@ -134,6 +134,56 @@ export async function removeMarketplaceUrl({ logger }: ExtensionServices): Promi
     vscode.window.showInformationMessage('Marketplace URL removed.');
 }
 
+/**
+ * Remove a marketplace URL from the tree view context (right-click on marketplace node).
+ */
+export async function removeMarketplaceFromTree({ logger }: ExtensionServices, node: { type: string; url: string }): Promise<void> {
+    if (!node || node.type !== 'marketplace' || !node.url) {
+        return;
+    }
+
+    const url = node.url;
+
+    // Check which scope(s) contain this URL
+    const globalUrls = getMarketplaceUrlsForTarget(vscode.ConfigurationTarget.Global);
+    const workspaceUrls = getMarketplaceUrlsForTarget(vscode.ConfigurationTarget.Workspace);
+
+    const inGlobal = globalUrls.includes(url);
+    const inWorkspace = workspaceUrls.includes(url);
+
+    if (!inGlobal && !inWorkspace) {
+        vscode.window.showWarningMessage('This marketplace URL is not found in settings.');
+        return;
+    }
+
+    const confirm = await vscode.window.showWarningMessage(
+        `Remove "${url}" from settings?`,
+        { modal: false },
+        'Remove'
+    );
+
+    if (confirm !== 'Remove') {
+        return;
+    }
+
+    // Remove from all scopes where it exists
+    if (inGlobal) {
+        await updateMarketplaceUrls(
+            globalUrls.filter((u) => u !== url),
+            vscode.ConfigurationTarget.Global
+        );
+    }
+    if (inWorkspace) {
+        await updateMarketplaceUrls(
+            workspaceUrls.filter((u) => u !== url),
+            vscode.ConfigurationTarget.Workspace
+        );
+    }
+
+    logger.info(`Removed marketplace URL from tree: ${url}`);
+    vscode.window.showInformationMessage('Marketplace removed.');
+}
+
 async function performDelegatedInstall(
     services: ExtensionServices,
     marketplaceUrls: string[],

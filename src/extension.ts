@@ -4,6 +4,7 @@ import {
 	addMarketplaceUrl,
 	browseMarketplace,
 	removeMarketplaceUrl,
+	removeMarketplaceFromTree,
 	previewItem,
 	installPluginFromTree,
 	gitHubSignIn,
@@ -120,6 +121,7 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('vscode-agent-plugins.browseMarketplace', () => browseMarketplace(services)),
 		vscode.commands.registerCommand('vscode-agent-plugins.addMarketplaceUrl', () => addMarketplaceUrl(services)),
 		vscode.commands.registerCommand('vscode-agent-plugins.removeMarketplaceUrl', () => removeMarketplaceUrl(services)),
+		vscode.commands.registerCommand('vscode-agent-plugins.removeMarketplaceFromTree', (node) => removeMarketplaceFromTree(services, node)),
 		vscode.commands.registerCommand('vscode-agent-plugins.refreshTreeView', () => provider.loadData()),
 		vscode.commands.registerCommand('vscode-agent-plugins.forceRefreshTreeView', () => {
 			logger.info('Force refresh requested - clearing marketplace cache');

@@ -194,6 +194,135 @@ function repoContextFromDocumentUrl(documentUrl: string): RepoContext | undefine
 	};
 }
 
+/**
+ * Parse a GitHub repository URL (e.g., https://github.com/owner/repo) into a RepoContext.
+ * Attempts to detect the default branch by checking main first, then master.
+ */
+async function repoContextFromGitHubUrl(url: string): Promise<RepoContext | undefined> {
+	try {
+		const parsed = new URL(url);
+		const hostname = parsed.hostname.toLowerCase();
+		if (hostname !== 'github.com' && hostname !== 'www.github.com') {
+			return undefined;
+		}
+
+		const parts = parsed.pathname.split('/').filter(Boolean);
+		if (parts.length < 2) {
+			return undefined;
+		}
+
+		const owner = parts[0];
+		const repo = parts[1].replace(/\.git$/i, '');
+
+		// If URL includes a branch (e.g., /tree/{branch}), use it
+		if (parts.length >= 4 && parts[2] === 'tree') {
+			const branch = parts[3];
+			return {
+				owner,
+				repo,
+				branch,
+				rawBaseUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`,
+				blobBaseUrl: `https://github.com/${owner}/${repo}/blob/${branch}`
+			};
+		}
+
+		// Otherwise, detect the default branch by trying main first, then master
+		for (const branch of ['main', 'master']) {
+			try {
+				const testUrl = `https://api.github.com/repos/${owner}/${repo}/contents?ref=${branch}`;
+				const response = await authenticatedFetch(testUrl, {
+					headers: {
+						'User-Agent': 'vscode-agent-plugins',
+						'Accept': 'application/vnd.github+json'
+					}
+				});
+				if (response.ok) {
+					return {
+						owner,
+						repo,
+						branch,
+						rawBaseUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`,
+						blobBaseUrl: `https://github.com/${owner}/${repo}/blob/${branch}`
+					};
+				}
+			} catch {
+				continue;
+			}
+		}
+
+		// Fall back to main
+		return {
+			owner,
+			repo,
+			branch: 'main',
+			rawBaseUrl: `https://raw.githubusercontent.com/${owner}/${repo}/main`,
+			blobBaseUrl: `https://github.com/${owner}/${repo}/blob/main`
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Auto-discover groups (skills, agents, etc.) from a repo root and create a synthetic plugin.
+ * This allows adding any GitHub repo without requiring a marketplace.json.
+ */
+async function discoverPluginFromRepo(
+	sourceUrl: string,
+	repoContext: RepoContext
+): Promise<MarketplaceFetchResult> {
+	getLogger()?.trace(`Attempting direct repo discovery for ${sourceUrl}`);
+
+	const groupDefinitions = [
+		{ key: 'skills', name: 'Skills' },
+		{ key: 'agents', name: 'Agents' },
+		{ key: 'commands', name: 'Commands' },
+		{ key: 'tools', name: 'Tools' },
+		{ key: 'prompts', name: 'Prompts' },
+		{ key: 'workflows', name: 'Workflows' }
+	];
+
+	const discoveredGroups: MarketplacePluginGroup[] = [];
+	for (const definition of groupDefinitions) {
+		const discovered = await expandGroupDirectoryReference(definition.key, definition.key, repoContext);
+		if (discovered && discovered.length > 0) {
+			getLogger()?.trace(`Auto-discovered ${definition.key}/ directory at repo root`);
+			discoveredGroups.push({
+				name: definition.name,
+				key: definition.key,
+				items: discovered
+			});
+		}
+	}
+
+	if (discoveredGroups.length === 0) {
+		return {
+			plugins: [],
+			warnings: [`No marketplace.json found and no convention directories (skills/, agents/, etc.) discovered at ${sourceUrl}.`],
+			errors: []
+		};
+	}
+
+	const syntheticPlugin: MarketplacePlugin = {
+		id: `${repoContext.owner}/${repoContext.repo}`,
+		name: repoContext.repo,
+		description: `Auto-discovered from ${repoContext.owner}/${repoContext.repo}`,
+		version: 'auto-discovered',
+		groups: discoveredGroups,
+		sourceUrl,
+		marketplaceDocumentUrl: sourceUrl,
+		raw: { source: './' }
+	};
+
+	getLogger()?.info(`Created synthetic plugin from repo: ${syntheticPlugin.name} with ${discoveredGroups.length} group(s)`);
+
+	return {
+		plugins: [syntheticPlugin],
+		warnings: [],
+		errors: []
+	};
+}
+
 function encodePath(pathValue: string): string {
 	return pathValue
 		.split('/')
@@ -763,6 +892,23 @@ export function normalizeMarketplaceDocument(
 export async function fetchMarketplace(sourceUrl: string): Promise<MarketplaceFetchResult> {
 	const resolution = await resolveMarketplaceUrl(sourceUrl);
 	if (!resolution.documentUrl) {
+		// No marketplace.json found - try direct repo discovery for GitHub URLs
+		const repoContext = await repoContextFromGitHubUrl(sourceUrl);
+		if (repoContext) {
+			getLogger()?.info(`No marketplace.json found for ${sourceUrl}, attempting direct repo discovery`);
+			const discovered = await discoverPluginFromRepo(sourceUrl, repoContext);
+			if (discovered.plugins.length > 0) {
+				// Merge resolution warnings with discovery result
+				discovered.warnings.unshift(...resolution.warnings);
+				return discovered;
+			}
+			// Discovery also failed - return combined errors
+			return {
+				plugins: [],
+				warnings: [...resolution.warnings, ...discovered.warnings],
+				errors: resolution.errors
+			};
+		}
 		return {
 			plugins: [],
 			warnings: resolution.warnings,
