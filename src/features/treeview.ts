@@ -148,6 +148,17 @@ export class MarketplaceTreeDataProvider implements vscode.TreeDataProvider<Tree
                     this._refreshingInBackground = result.refreshing ?? false;
                     this.updateMarketplacesFromResult(result, urls);
 
+                    for (const warning of result.warnings) {
+                        this.services.logger.warn(`[marketplace] ${warning}`);
+                    }
+                    for (const error of result.errors) {
+                        this.services.logger.error(`[marketplace] ${error}`);
+                    }
+
+                    for (const marketplace of this._marketplaces) {
+                        this.services.logger.info(`Marketplace '${marketplace.url}' has ${marketplace.plugins.length} plugin(s).`);
+                    }
+
                     const cacheNote = result.fromCache ? ' (cached)' : '';
                     const refreshNote = result.refreshing ? ' - refreshing in background' : '';
                     this.services.logger.info(`Tree view loaded ${result.plugins.length} plugin(s) from ${urls.length} marketplace(s)${cacheNote}${refreshNote}.`);

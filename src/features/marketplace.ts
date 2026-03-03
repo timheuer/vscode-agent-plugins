@@ -74,11 +74,28 @@ function asString(value: unknown): string | undefined {
 }
 
 function normalizeRelativePath(value: string): string {
-	return value.replace(/^\.\//, '').replace(/^\//, '');
+	return value
+		.replace(/\\/g, '/')
+		.replace(/^\.\//, '')
+		.replace(/^\//, '')
+		.replace(/\/+$/, '');
 }
 
 function isHttpUrl(value: string): boolean {
 	return /^https?:\/\//i.test(value);
+}
+
+export function resolveMarketplaceDocumentReference(reference: string, baseDocumentUrl: string): string | undefined {
+	const trimmed = reference.trim();
+	if (!trimmed) {
+		return undefined;
+	}
+
+	try {
+		return new URL(trimmed, baseDocumentUrl).toString();
+	} catch {
+		return undefined;
+	}
 }
 
 function candidateMarketplaceUrls(inputUrl: string): string[] {
@@ -150,6 +167,23 @@ async function authenticatedFetch(url: string, options: RequestInit = {}): Promi
 		return fetchWithGitHubAuth(url, options);
 	}
 	return fetch(url, options);
+}
+
+async function parseMarketplacePayload(response: Response): Promise<unknown> {
+	const text = await response.text();
+	const trimmed = text.trim();
+
+	if (!trimmed) {
+		return undefined;
+	}
+
+	try {
+		return JSON.parse(trimmed) as unknown;
+	} catch {
+		// Some repos publish a plain-text redirect file such as '../.github/plugin/marketplace.json'.
+		// Treat any non-JSON payload as a document reference and resolve it in fetchMarketplace.
+		return trimmed;
+	}
 }
 
 async function resolveMarketplaceUrl(inputUrl: string): Promise<{ documentUrl?: string; warnings: string[]; errors: string[] }> {
@@ -726,6 +760,9 @@ async function hydratePluginGroupsFromSource(
 
 	const source = asString(plugin.raw.source) ?? './';
 	const sourceConfig = await fetchPluginSourceConfig(source, repoContext);
+	const hydratedName = asString(sourceConfig?.name) ?? plugin.name;
+	const hydratedDescription = asString(sourceConfig?.description) ?? plugin.description;
+	const hydratedVersion = asString(sourceConfig?.version) ?? plugin.version;
 
 	// Source base path for resolving relative paths within the plugin
 	const sourceBasePath = normalizeRelativePath(source).replace(/\/+$/, '');
@@ -784,11 +821,19 @@ async function hydratePluginGroupsFromSource(
 	getLogger()?.trace(`hydratedGroups for "${plugin.name}": ${hydratedGroups.map(g => `${g.name}(${g.items.length})`).join(', ')}`);
 
 	if (hydratedGroups.length === 0) {
-		return plugin;
+		return {
+			...plugin,
+			name: hydratedName,
+			description: hydratedDescription,
+			version: hydratedVersion
+		};
 	}
 
 	return {
 		...plugin,
+		name: hydratedName,
+		description: hydratedDescription,
+		version: hydratedVersion,
 		groups: hydratedGroups
 	};
 }
@@ -917,18 +962,39 @@ export async function fetchMarketplace(sourceUrl: string): Promise<MarketplaceFe
 	}
 
 	try {
-		const response = await authenticatedFetch(resolution.documentUrl);
-		if (!response.ok) {
-			return {
-				plugins: [],
-				warnings: resolution.warnings,
-				errors: [`Failed to fetch ${resolution.documentUrl}: ${response.status} ${response.statusText}`]
-			};
+		const warnings = [...resolution.warnings];
+		let marketplaceDocumentUrl = resolution.documentUrl;
+		let json: unknown;
+
+		for (let hop = 0; hop < 3; hop += 1) {
+			const response = await authenticatedFetch(marketplaceDocumentUrl);
+			if (!response.ok) {
+				return {
+					plugins: [],
+					warnings,
+					errors: [`Failed to fetch ${marketplaceDocumentUrl}: ${response.status} ${response.statusText}`]
+				};
+			}
+
+			json = await parseMarketplacePayload(response);
+			if (typeof json !== 'string') {
+				break;
+			}
+
+			const redirectedUrl = resolveMarketplaceDocumentReference(json, marketplaceDocumentUrl);
+			if (!redirectedUrl || redirectedUrl === marketplaceDocumentUrl) {
+				break;
+			}
+
+			warnings.push(`Marketplace document reference resolved: ${marketplaceDocumentUrl} -> ${redirectedUrl}`);
+			getLogger()?.trace(`Marketplace document redirected: ${marketplaceDocumentUrl} -> ${redirectedUrl}`);
+			marketplaceDocumentUrl = redirectedUrl;
 		}
 
-		const json = (await response.json()) as unknown;
-		const repoContext = repoContextFromDocumentUrl(resolution.documentUrl);
-		const normalized = normalizeMarketplaceDocument(json, sourceUrl, resolution.documentUrl, repoContext);
+		const repoContext = repoContextFromDocumentUrl(marketplaceDocumentUrl);
+		getLogger()?.trace(`Normalizing marketplace document from ${marketplaceDocumentUrl}`);
+		const normalized = normalizeMarketplaceDocument(json, sourceUrl, marketplaceDocumentUrl, repoContext);
+		getLogger()?.trace(`Normalized ${normalized.plugins.length} plugin(s) from ${sourceUrl}`);
 
 		if (repoContext && normalized.plugins.length > 0) {
 			const hydratedPlugins: MarketplacePlugin[] = [];
@@ -938,7 +1004,7 @@ export async function fetchMarketplace(sourceUrl: string): Promise<MarketplaceFe
 			normalized.plugins = hydratedPlugins;
 		}
 
-		normalized.warnings.unshift(...resolution.warnings);
+		normalized.warnings.unshift(...warnings);
 		return normalized;
 	} catch (error) {
 		return {

@@ -88,7 +88,11 @@ function getPluginName(plugin: MarketplacePlugin): string {
 }
 
 function normalizeRelativePath(value: string): string {
-    return value.replace(/^\.\//, '').replace(/^\//, '').replace(/\/+$/, '');
+    return value
+        .replace(/\\/g, '/')
+        .replace(/^\.\//, '')
+        .replace(/^\//, '')
+        .replace(/\/+$/, '');
 }
 
 function encodePath(value: string): string {

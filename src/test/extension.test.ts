@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { buildInstallPayload } from '../features/delegation';
-import { normalizeMarketplaceDocument } from '../features/marketplace';
+import { normalizeMarketplaceDocument, resolveMarketplaceDocumentReference } from '../features/marketplace';
 
 suite('Extension Test Suite', () => {
 	test('normalizes marketplace plugin entries', () => {
@@ -54,5 +54,38 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(payload.scope, 'workspace');
 		assert.strictEqual(payload.plugins.length, 1);
 		assert.strictEqual(payload.marketplaceUrls.length, 1);
+	});
+
+	test('resolves relative marketplace document references', () => {
+		const result = resolveMarketplaceDocumentReference(
+			'../.github/plugin/marketplace.json',
+			'https://raw.githubusercontent.com/dotnet/skills/main/.claude-plugin/marketplace.json'
+		);
+
+		assert.strictEqual(
+			result,
+			'https://raw.githubusercontent.com/dotnet/skills/main/.github/plugin/marketplace.json'
+		);
+	});
+
+	test('resolves absolute marketplace document references', () => {
+		const result = resolveMarketplaceDocumentReference(
+			'https://example.com/marketplace.json',
+			'https://raw.githubusercontent.com/dotnet/skills/main/.claude-plugin/marketplace.json'
+		);
+
+		assert.strictEqual(result, 'https://example.com/marketplace.json');
+	});
+
+	test('resolves plain text redirect references', () => {
+		const result = resolveMarketplaceDocumentReference(
+			'../.github/plugin/marketplace.json\n',
+			'https://raw.githubusercontent.com/dotnet/skills/main/.claude-plugin/marketplace.json'
+		);
+
+		assert.strictEqual(
+			result,
+			'https://raw.githubusercontent.com/dotnet/skills/main/.github/plugin/marketplace.json'
+		);
 	});
 });
