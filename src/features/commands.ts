@@ -198,8 +198,8 @@ async function performDelegatedInstall(
 
     const targetSummary =
         scope === 'workspace'
-            ? `Skills: ${targetPath}\\.agents\\skills\nAgents: ${targetPath}\\.github\\agents`
-            : `Root: ${targetPath}\\<marketplace-name>\\<plugin-name>\\(skills|agents)`;
+            ? `Skills: ${targetPath}\\.agents\\skills\nAgents: ${targetPath}\\.github\\agents\nHooks: ${targetPath}\\.github\\hooks\nMCP: ${targetPath}\\.github\\mcp\nLSP: ${targetPath}\\.github\\lsp`
+            : `Root: ${targetPath}\\<marketplace-name>\\<plugin-name>\\(skills|agents|hooks|mcp|lsp)`;
 
     const confirmation = await vscode.window.showWarningMessage(
         `Install/update ${selectedPlugins.length} plugin(s) in ${scope} scope?\n${targetSummary}`,
@@ -219,7 +219,7 @@ async function performDelegatedInstall(
     if (result.success) {
         vscode.window.showInformationMessage(
             scope === 'workspace'
-                ? `Installed/updated ${selectedPlugins.length} plugin(s) in workspace (.agents/skills and .github/agents).`
+                ? `Installed/updated ${selectedPlugins.length} plugin(s) in workspace (.agents/skills, .github/agents, .github/hooks, .github/mcp, .github/lsp).`
                 : `Installed/updated ${selectedPlugins.length} plugin(s) in user scope (~/.copilot/installed-plugins).`
         );
         return;
@@ -428,6 +428,20 @@ function simpleMarkdownToHtml(markdown: string): string {
     return html;
 }
 
+function tryFormatJsonContent(content: string): string | undefined {
+    const trimmed = content.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+        return undefined;
+    }
+
+    try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        return JSON.stringify(parsed, null, 2);
+    } catch {
+        return undefined;
+    }
+}
+
 function createPreviewWebviewHtml(
     panel: vscode.WebviewPanel,
     extensionUri: vscode.Uri,
@@ -442,8 +456,11 @@ function createPreviewWebviewHtml(
         vscode.Uri.joinPath(extensionUri, 'dist', 'codicon.css')
     );
 
+    const formattedJson = tryFormatJsonContent(content);
     const { frontmatter, body } = parseMarkdownFrontmatter(content);
-    const renderedBody = simpleMarkdownToHtml(body);
+    const renderedBody = formattedJson
+        ? `<pre><code>${escapeHtml(formattedJson)}</code></pre>`
+        : simpleMarkdownToHtml(body);
 
     const description = frontmatter.description || frontmatter.summary || '';
     const license = frontmatter.license || '';
@@ -451,6 +468,9 @@ function createPreviewWebviewHtml(
     const groupIconMap: Record<string, string> = {
         skills: 'tools',
         agents: 'account',
+        hooks: 'symbol-event',
+        mcp: 'plug',
+        lsp: 'symbol-keyword',
         commands: 'terminal-cmd',
         tools: 'wrench',
         prompts: 'comment-discussion',

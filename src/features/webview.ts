@@ -335,6 +335,9 @@ export function createMarketplaceWebviewHtml(
             const groupIconNameMap = {
               skills: 'tools',
               agents: 'account',
+              hooks: 'symbol-event',
+              mcp: 'plug',
+              lsp: 'symbol-class',
               commands: 'terminal-cmd',
               tools: 'wrench',
               prompts: 'comment-discussion',

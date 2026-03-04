@@ -2,6 +2,7 @@ import { fetchWithGitHubAuth } from './github-auth';
 import { getLogger } from './logger';
 import { getCache, CacheKeys, MarketplaceCache } from './cache';
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 
 // Event emitter for cache updates (allows UI to refresh when background fetch completes)
 const _onCacheUpdated = new vscode.EventEmitter<string[]>();
@@ -32,6 +33,7 @@ export interface MarketplaceGroupItem {
 	metadataFallbackUrls: string[];
 	docUrl?: string;
 	description?: string;
+	inlineContent?: unknown;
 }
 
 export interface MarketplaceFetchResult {
@@ -310,6 +312,9 @@ async function discoverPluginFromRepo(
 	const groupDefinitions = [
 		{ key: 'skills', name: 'Skills' },
 		{ key: 'agents', name: 'Agents' },
+		{ key: 'hooks', name: 'Hooks' },
+		{ key: 'mcp', name: 'MCP' },
+		{ key: 'lsp', name: 'LSP' },
 		{ key: 'commands', name: 'Commands' },
 		{ key: 'tools', name: 'Tools' },
 		{ key: 'prompts', name: 'Prompts' },
@@ -484,9 +489,19 @@ function descriptorDefaultsForGroup(groupKey: string): string[] {
 			return ['SKILL.md', 'README.md'];
 		case 'agents':
 			return ['AGENT.md', 'AGENTS.md', 'README.md'];
+		case 'hooks':
+			return ['hooks.json', 'hooks/hooks.json', 'README.md'];
+		case 'mcp':
+			return ['.mcp.json', 'mcp.json', 'README.md'];
+		case 'lsp':
+			return ['lsp.json', '.lsp.json', 'README.md'];
 		default:
 			return ['README.md'];
 	}
+}
+
+function looksLikeFilePath(pathValue: string): boolean {
+	return /\.[a-z0-9]+$/i.test(path.posix.basename(pathValue));
 }
 
 function buildItemFromPath(pathValue: string, groupKey: string, repoContext?: RepoContext): MarketplaceGroupItem {
@@ -508,7 +523,8 @@ function buildItemFromPath(pathValue: string, groupKey: string, repoContext?: Re
 	}
 
 	const isMarkdownPath = /\.md$/i.test(cleanedPath);
-	if (isMarkdownPath) {
+	const isFilePath = isMarkdownPath || looksLikeFilePath(cleanedPath);
+	if (isFilePath) {
 		return {
 			name: displayName,
 			path: cleanedPath,
@@ -582,6 +598,16 @@ function toGroupItems(value: unknown, groupKey: string, repoContext?: RepoContex
 		return [];
 	}
 
+	const pathLikeValue = asString(record.path) ?? asString(record.source) ?? asString(record.url);
+	const isInlineConfigGroup = groupKey === 'hooks' || groupKey === 'mcp' || groupKey === 'lsp';
+	if (isInlineConfigGroup && !pathLikeValue) {
+		return [{
+			name: groupKey,
+			metadataFallbackUrls: [],
+			inlineContent: record
+		}];
+	}
+
 	const items: MarketplaceGroupItem[] = [];
 	for (const [key, entryValue] of Object.entries(record)) {
 		const item = buildGroupItem(entryValue, groupKey, repoContext, sourceBasePath);
@@ -618,19 +644,38 @@ function collectGroupValues(record: UnknownRecord, key: string, repoContext?: Re
 	return mergeGroupItems(primary, secondary);
 }
 
+function collectGroupValuesForKeys(
+	record: UnknownRecord,
+	keys: string[],
+	repoContext?: RepoContext,
+	sourceBasePath?: string
+): MarketplaceGroupItem[] {
+	let merged: MarketplaceGroupItem[] = [];
+	for (const key of keys) {
+		const items = collectGroupValues(record, key, repoContext, sourceBasePath)
+			.map((item) => ({ ...item, path: item.path ? normalizeRelativePath(item.path) : item.path }));
+		merged = mergeGroupItems(merged, items);
+	}
+
+	return merged.map((item) => ({ ...item, path: item.path, metadataFallbackUrls: item.metadataFallbackUrls }));
+}
+
 function extractPluginGroups(record: UnknownRecord, repoContext?: RepoContext, sourceBasePath?: string): MarketplacePluginGroup[] {
 	const groupDefinitions = [
-		{ key: 'skills', name: 'Skills' },
-		{ key: 'agents', name: 'Agents' },
-		{ key: 'commands', name: 'Commands' },
-		{ key: 'tools', name: 'Tools' },
-		{ key: 'prompts', name: 'Prompts' },
-		{ key: 'workflows', name: 'Workflows' }
+		{ key: 'skills', name: 'Skills', sourceKeys: ['skills'] },
+		{ key: 'agents', name: 'Agents', sourceKeys: ['agents'] },
+		{ key: 'hooks', name: 'Hooks', sourceKeys: ['hooks'] },
+		{ key: 'mcp', name: 'MCP', sourceKeys: ['mcp', 'mcpServers'] },
+		{ key: 'lsp', name: 'LSP', sourceKeys: ['lsp', 'lspServers'] },
+		{ key: 'commands', name: 'Commands', sourceKeys: ['commands'] },
+		{ key: 'tools', name: 'Tools', sourceKeys: ['tools'] },
+		{ key: 'prompts', name: 'Prompts', sourceKeys: ['prompts'] },
+		{ key: 'workflows', name: 'Workflows', sourceKeys: ['workflows'] }
 	];
 
 	const groups: MarketplacePluginGroup[] = [];
 	for (const definition of groupDefinitions) {
-		const items = collectGroupValues(record, definition.key, repoContext, sourceBasePath);
+		const items = collectGroupValuesForKeys(record, definition.sourceKeys, repoContext, sourceBasePath);
 		if (items.length > 0) {
 			groups.push({
 				name: definition.name,
@@ -779,18 +824,27 @@ async function hydratePluginGroupsFromSource(
 	}
 
 	const groupDefinitions = [
-		{ key: 'skills', name: 'Skills' },
-		{ key: 'agents', name: 'Agents' },
-		{ key: 'commands', name: 'Commands' },
-		{ key: 'tools', name: 'Tools' },
-		{ key: 'prompts', name: 'Prompts' },
-		{ key: 'workflows', name: 'Workflows' }
+		{ key: 'skills', name: 'Skills', sourceKeys: ['skills'] },
+		{ key: 'agents', name: 'Agents', sourceKeys: ['agents'] },
+		{ key: 'hooks', name: 'Hooks', sourceKeys: ['hooks'] },
+		{ key: 'mcp', name: 'MCP', sourceKeys: ['mcp', 'mcpServers'] },
+		{ key: 'lsp', name: 'LSP', sourceKeys: ['lsp', 'lspServers'] },
+		{ key: 'commands', name: 'Commands', sourceKeys: ['commands'] },
+		{ key: 'tools', name: 'Tools', sourceKeys: ['tools'] },
+		{ key: 'prompts', name: 'Prompts', sourceKeys: ['prompts'] },
+		{ key: 'workflows', name: 'Workflows', sourceKeys: ['workflows'] }
 	];
 
 	const hydratedGroups: MarketplacePluginGroup[] = [];
 	for (const definition of groupDefinitions) {
 		// Check top-level first, then manifest (if sourceConfig exists)
-		const groupValue = sourceConfig?.[definition.key] ?? manifest?.[definition.key];
+		let groupValue: unknown;
+		for (const sourceKey of definition.sourceKeys) {
+			groupValue = sourceConfig?.[sourceKey] ?? manifest?.[sourceKey];
+			if (typeof groupValue !== 'undefined') {
+				break;
+			}
+		}
 
 		// Auto-discover: if not defined, try convention-based directory (e.g., "skills/", "agents/")
 		if (typeof groupValue === 'undefined') {
@@ -1231,6 +1285,12 @@ export async function fetchGroupItemDescription(item: MarketplaceGroupItem): Pro
 }
 
 export async function fetchGroupItemContent(item: MarketplaceGroupItem): Promise<{ content?: string; url?: string }> {
+	if (typeof item.inlineContent !== 'undefined') {
+		return {
+			content: `${JSON.stringify(item.inlineContent, null, 2)}\n`
+		};
+	}
+
 	const urls = [item.metadataUrl, ...item.metadataFallbackUrls].filter((entry): entry is string => Boolean(entry));
 	for (const url of urls) {
 		try {

@@ -32,6 +32,9 @@ export interface OperationResult {
 interface InstalledPathCollection {
     skillPaths: string[];
     agentPaths: string[];
+    hookPaths: string[];
+    mcpPaths: string[];
+    lspPaths: string[];
 }
 
 interface RepoContext {
@@ -315,9 +318,56 @@ async function installAgentItem(plugin: MarketplacePlugin, item: MarketplaceGrou
     await fs.writeFile(filePath, content, 'utf8');
 }
 
+function looksLikeFilePath(value: string): boolean {
+    return /\.[a-z0-9]+$/i.test(path.posix.basename(value));
+}
+
+async function installConfigItem(
+    plugin: MarketplacePlugin,
+    item: MarketplaceGroupItem,
+    groupRoot: string,
+    groupKey: 'hooks' | 'mcp' | 'lsp'
+): Promise<void> {
+    await fs.mkdir(groupRoot, { recursive: true });
+
+    if (typeof item.inlineContent !== 'undefined') {
+        const fileName = groupKey === 'hooks'
+            ? 'hooks.json'
+            : groupKey === 'mcp'
+                ? '.mcp.json'
+                : 'lsp.json';
+        const filePath = path.join(groupRoot, fileName);
+        const serialized = JSON.stringify(item.inlineContent, null, 2);
+        await fs.writeFile(filePath, `${serialized}\n`, 'utf8');
+        return;
+    }
+
+    const repoContext = getRepoContext(plugin);
+    const sourcePath = item.path ? normalizeRelativePath(item.path) : undefined;
+    if (repoContext && sourcePath) {
+        const copyTarget = looksLikeFilePath(sourcePath)
+            ? groupRoot
+            : path.join(groupRoot, sanitizePathSegment(item.name));
+        const copied = await copyGithubEntryTree(repoContext, sourcePath, copyTarget);
+        if (copied) {
+            return;
+        }
+    }
+
+    const fallbackRoot = sourcePath && looksLikeFilePath(sourcePath)
+        ? groupRoot
+        : path.join(groupRoot, sanitizePathSegment(item.name));
+
+    await fs.mkdir(fallbackRoot, { recursive: true });
+    await fallbackDownloadItemDescriptor(item, fallbackRoot);
+}
+
 async function materializeLocalInstallStructure(workspaceRoot: string, plugins: MarketplacePlugin[]): Promise<void> {
     const skillsRoot = path.join(workspaceRoot, '.agents', 'skills');
     const agentsRoot = path.join(workspaceRoot, '.github', 'agents');
+    const hooksRoot = path.join(workspaceRoot, '.github', 'hooks');
+    const mcpRoot = path.join(workspaceRoot, '.github', 'mcp');
+    const lspRoot = path.join(workspaceRoot, '.github', 'lsp');
 
     const installPromises: Promise<void>[] = [];
 
@@ -334,6 +384,24 @@ async function materializeLocalInstallStructure(workspaceRoot: string, plugins: 
                     installPromises.push(installAgentItem(plugin, item, agentsRoot));
                 }
             }
+
+            if (group.key === 'hooks') {
+                for (const item of group.items) {
+                    installPromises.push(installConfigItem(plugin, item, hooksRoot, 'hooks'));
+                }
+            }
+
+            if (group.key === 'mcp') {
+                for (const item of group.items) {
+                    installPromises.push(installConfigItem(plugin, item, mcpRoot, 'mcp'));
+                }
+            }
+
+            if (group.key === 'lsp') {
+                for (const item of group.items) {
+                    installPromises.push(installConfigItem(plugin, item, lspRoot, 'lsp'));
+                }
+            }
         }
     }
 
@@ -343,6 +411,9 @@ async function materializeLocalInstallStructure(workspaceRoot: string, plugins: 
 async function materializeUserInstallStructure(userRoot: string, plugins: MarketplacePlugin[]): Promise<InstalledPathCollection> {
     const skillPaths = new Set<string>();
     const agentPaths = new Set<string>();
+    const hookPaths = new Set<string>();
+    const mcpPaths = new Set<string>();
+    const lspPaths = new Set<string>();
 
     const installPromises: Promise<void>[] = [];
 
@@ -350,6 +421,9 @@ async function materializeUserInstallStructure(userRoot: string, plugins: Market
         const pluginRoot = path.join(userRoot, getMarketplaceName(plugin.sourceUrl), getPluginName(plugin));
         const skillsRoot = path.join(pluginRoot, 'skills');
         const agentsRoot = path.join(pluginRoot, 'agents');
+        const hooksRoot = path.join(pluginRoot, 'hooks');
+        const mcpRoot = path.join(pluginRoot, 'mcp');
+        const lspRoot = path.join(pluginRoot, 'lsp');
 
         for (const group of plugin.groups) {
             if (group.key === 'skills') {
@@ -369,6 +443,33 @@ async function materializeUserInstallStructure(userRoot: string, plugins: Market
                     agentPaths.add(agentsRoot);
                 }
             }
+
+            if (group.key === 'hooks') {
+                for (const item of group.items) {
+                    installPromises.push(installConfigItem(plugin, item, hooksRoot, 'hooks'));
+                }
+                if (group.items.length > 0) {
+                    hookPaths.add(hooksRoot);
+                }
+            }
+
+            if (group.key === 'mcp') {
+                for (const item of group.items) {
+                    installPromises.push(installConfigItem(plugin, item, mcpRoot, 'mcp'));
+                }
+                if (group.items.length > 0) {
+                    mcpPaths.add(mcpRoot);
+                }
+            }
+
+            if (group.key === 'lsp') {
+                for (const item of group.items) {
+                    installPromises.push(installConfigItem(plugin, item, lspRoot, 'lsp'));
+                }
+                if (group.items.length > 0) {
+                    lspPaths.add(lspRoot);
+                }
+            }
         }
     }
 
@@ -376,7 +477,10 @@ async function materializeUserInstallStructure(userRoot: string, plugins: Market
 
     return {
         skillPaths: Array.from(skillPaths),
-        agentPaths: Array.from(agentPaths)
+        agentPaths: Array.from(agentPaths),
+        hookPaths: Array.from(hookPaths),
+        mcpPaths: Array.from(mcpPaths),
+        lspPaths: Array.from(lspPaths)
     };
 }
 

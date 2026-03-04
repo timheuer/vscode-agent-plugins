@@ -48,12 +48,18 @@ Click any skill or agent item to open a detailed preview panel with:
 
 - Skills: `<workspace>/.agents/skills/<skill-name>/...`
 - Agents: `<workspace>/.github/agents/<agent-name>.agent.md`
+- Hooks: `<workspace>/.github/hooks/...`
+- MCP configs: `<workspace>/.github/mcp/...`
+- LSP configs: `<workspace>/.github/lsp/...`
 
 **User scope:**
 
 - Root: `~/.copilot/installed-plugins/<marketplace-name>/<plugin-name>/`
 - Skills: `.../skills/<skill-name>/...`
 - Agents: `.../agents/<agent-name>.agent.md`
+- Hooks: `.../hooks/...`
+- MCP configs: `.../mcp/...`
+- LSP configs: `.../lsp/...`
 - Automatically updates `chat.agentSkillsLocations` and `chat.agentFilesLocations` workspace settings
 
 ### Output Logging

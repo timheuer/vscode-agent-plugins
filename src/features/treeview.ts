@@ -45,6 +45,9 @@ type TreeNode = MarketplaceNode | PluginNode | GroupNode | ItemNode;
 const groupIconMap: Record<string, string> = {
     skills: 'tools',
     agents: 'account',
+    hooks: 'symbol-event',
+    mcp: 'plug',
+    lsp: 'symbol-class',
     commands: 'terminal-cmd',
     tools: 'wrench',
     prompts: 'comment-discussion',

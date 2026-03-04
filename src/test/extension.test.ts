@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { buildInstallPayload } from '../features/delegation';
-import { normalizeMarketplaceDocument, resolveMarketplaceDocumentReference } from '../features/marketplace';
+import { fetchGroupItemContent, normalizeMarketplaceDocument, resolveMarketplaceDocumentReference } from '../features/marketplace';
 
 suite('Extension Test Suite', () => {
 	test('normalizes marketplace plugin entries', () => {
@@ -87,5 +87,85 @@ suite('Extension Test Suite', () => {
 			result,
 			'https://raw.githubusercontent.com/dotnet/skills/main/.github/plugin/marketplace.json'
 		);
+	});
+
+	test('normalizes hooks, mcp, and lsp groups', () => {
+		const result = normalizeMarketplaceDocument(
+			{
+				plugins: [
+					{
+						id: 'spec-plugin',
+						name: 'Spec Plugin',
+						hooks: './hooks.json',
+						mcpServers: './.mcp.json',
+						lspServers: './lsp.json'
+					}
+				]
+			},
+			'https://example.com/marketplace.json'
+		);
+
+		const groups = result.plugins[0].groups.map((group) => group.key).sort();
+		assert.deepStrictEqual(groups, ['hooks', 'lsp', 'mcp']);
+	});
+
+	test('normalizes inline mcpServers object as installable item', () => {
+		const result = normalizeMarketplaceDocument(
+			{
+				plugins: [
+					{
+						id: 'inline-config-plugin',
+						name: 'Inline Config Plugin',
+						mcpServers: {
+							myServer: {
+								command: 'node',
+								args: ['server.js']
+							}
+						}
+					}
+				]
+			},
+			'https://example.com/marketplace.json'
+		);
+
+		const mcpGroup = result.plugins[0].groups.find((group) => group.key === 'mcp');
+		assert.ok(mcpGroup);
+		assert.strictEqual(mcpGroup?.items.length, 1);
+		assert.strictEqual(mcpGroup?.items[0].name, 'mcp');
+		assert.ok(typeof mcpGroup?.items[0].inlineContent === 'object');
+	});
+
+	test('treats mcpServers file path as direct file metadata URL', () => {
+		const result = normalizeMarketplaceDocument(
+			{
+				plugins: [
+					{
+						id: 'file-config-plugin',
+						name: 'File Config Plugin',
+						mcpServers: './.mcp.json'
+					}
+				]
+			},
+			'https://example.com/marketplace.json',
+			'https://raw.githubusercontent.com/org/repo/main/.github/plugin/marketplace.json'
+		);
+
+		const mcpGroup = result.plugins[0].groups.find((group) => group.key === 'mcp');
+		assert.ok(mcpGroup);
+		assert.strictEqual(
+			mcpGroup?.items[0].metadataUrl,
+			'https://raw.githubusercontent.com/org/repo/main/.mcp.json'
+		);
+	});
+
+	test('returns inline group item content as formatted JSON', async () => {
+		const result = await fetchGroupItemContent({
+			name: 'mcp',
+			metadataFallbackUrls: [],
+			inlineContent: { myServer: { command: 'node' } }
+		});
+
+		assert.ok(result.content);
+		assert.ok(result.content?.includes('"myServer"'));
 	});
 });
