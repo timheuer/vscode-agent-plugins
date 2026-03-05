@@ -56,6 +56,8 @@ interface RepoContentEntry {
 	path?: string;
 }
 
+const SUPPORTED_SKILL_PROFILES = ['.curated'] as const;
+
 type UnknownRecord = Record<string, unknown>;
 
 function asRecord(value: unknown): UnknownRecord | undefined {
@@ -309,6 +311,36 @@ async function discoverPluginFromRepo(
 ): Promise<MarketplaceFetchResult> {
 	getLogger()?.trace(`Attempting direct repo discovery for ${sourceUrl}`);
 
+	const discoveredPlugins: MarketplacePlugin[] = [];
+	const warnings: string[] = [];
+
+	const skillsDirectoryEntries = await listRepoDirectory(repoContext, 'skills');
+	const supportedProfiles = getSupportedSkillProfileDirectories(skillsDirectoryEntries);
+	if (supportedProfiles.includes('.curated')) {
+		const curatedItems = await expandGroupDirectoryReference('skills/.curated', 'skills', repoContext);
+		if (curatedItems && curatedItems.length > 0) {
+			discoveredPlugins.push({
+				id: `${repoContext.owner}/${repoContext.repo}#curated`,
+				name: `${repoContext.repo} (curated)`,
+				description: `Auto-discovered curated skills from ${repoContext.owner}/${repoContext.repo}`,
+				version: 'auto-discovered',
+				groups: [
+					{
+						name: 'Skills',
+						key: 'skills',
+						items: curatedItems
+					}
+				],
+				sourceUrl,
+				marketplaceDocumentUrl: sourceUrl,
+				raw: {
+					source: 'skills/.curated',
+					profile: 'curated'
+				}
+			});
+		}
+	}
+
 	const groupDefinitions = [
 		{ key: 'skills', name: 'Skills' },
 		{ key: 'agents', name: 'Agents' },
@@ -323,6 +355,10 @@ async function discoverPluginFromRepo(
 
 	const discoveredGroups: MarketplacePluginGroup[] = [];
 	for (const definition of groupDefinitions) {
+		if (definition.key === 'skills' && supportedProfiles.includes('.curated')) {
+			continue;
+		}
+
 		const discovered = await expandGroupDirectoryReference(definition.key, definition.key, repoContext);
 		if (discovered && discovered.length > 0) {
 			getLogger()?.trace(`Auto-discovered ${definition.key}/ directory at repo root`);
@@ -335,6 +371,14 @@ async function discoverPluginFromRepo(
 	}
 
 	if (discoveredGroups.length === 0) {
+		if (discoveredPlugins.length > 0) {
+			return {
+				plugins: discoveredPlugins,
+				warnings,
+				errors: []
+			};
+		}
+
 		return {
 			plugins: [],
 			warnings: [`No marketplace.json found and no convention directories (skills/, agents/, etc.) discovered at ${sourceUrl}.`],
@@ -354,12 +398,24 @@ async function discoverPluginFromRepo(
 	};
 
 	getLogger()?.info(`Created synthetic plugin from repo: ${syntheticPlugin.name} with ${discoveredGroups.length} group(s)`);
+	discoveredPlugins.push(syntheticPlugin);
 
 	return {
-		plugins: [syntheticPlugin],
-		warnings: [],
+		plugins: discoveredPlugins,
+		warnings,
 		errors: []
 	};
+}
+
+export function getSupportedSkillProfileDirectories(entries: RepoContentEntry[] | undefined): string[] {
+	if (!entries || entries.length === 0) {
+		return [];
+	}
+
+	const supportedSet = new Set<string>(SUPPORTED_SKILL_PROFILES);
+	return entries
+		.filter((entry) => entry.type === 'dir' && typeof entry.name === 'string' && supportedSet.has(entry.name))
+		.map((entry) => entry.name as string);
 }
 
 function encodePath(pathValue: string): string {

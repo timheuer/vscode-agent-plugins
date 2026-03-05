@@ -1,6 +1,11 @@
 import * as assert from 'assert';
 import { buildInstallPayload } from '../features/delegation';
-import { fetchGroupItemContent, normalizeMarketplaceDocument, resolveMarketplaceDocumentReference } from '../features/marketplace';
+import {
+	fetchGroupItemContent,
+	getSupportedSkillProfileDirectories,
+	normalizeMarketplaceDocument,
+	resolveMarketplaceDocumentReference
+} from '../features/marketplace';
 
 suite('Extension Test Suite', () => {
 	test('normalizes marketplace plugin entries', () => {
@@ -167,5 +172,25 @@ suite('Extension Test Suite', () => {
 
 		assert.ok(result.content);
 		assert.ok(result.content?.includes('"myServer"'));
+	});
+
+	test('detects curated skill profile directory', () => {
+		const profiles = getSupportedSkillProfileDirectories([
+			{ type: 'dir', name: '.curated' },
+			{ type: 'dir', name: '.system' },
+			{ type: 'dir', name: 'doc' },
+			{ type: 'file', name: 'README.md' }
+		]);
+
+		assert.deepStrictEqual(profiles, ['.curated']);
+	});
+
+	test('returns no supported profiles when curated is absent', () => {
+		const profiles = getSupportedSkillProfileDirectories([
+			{ type: 'dir', name: '.system' },
+			{ type: 'dir', name: '.experimental' }
+		]);
+
+		assert.deepStrictEqual(profiles, []);
 	});
 });
