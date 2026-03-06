@@ -89,6 +89,29 @@ function isHttpUrl(value: string): boolean {
 	return /^https?:\/\//i.test(value);
 }
 
+function repoContextFromRawUrl(rawUrl: string): RepoContext | undefined {
+	try {
+		const parsed = new URL(rawUrl);
+		if (parsed.hostname !== 'raw.githubusercontent.com') {
+			return undefined;
+		}
+		const parts = parsed.pathname.split('/').filter(Boolean);
+		if (parts.length < 3) {
+			return undefined;
+		}
+		const [owner, repo, branch] = parts;
+		return {
+			owner,
+			repo,
+			branch,
+			rawBaseUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`,
+			blobBaseUrl: `https://github.com/${owner}/${repo}/blob/${branch}`
+		};
+	} catch {
+		return undefined;
+	}
+}
+
 export function resolveMarketplaceDocumentReference(reference: string, baseDocumentUrl: string): string | undefined {
 	const trimmed = reference.trim();
 	if (!trimmed) {
@@ -654,6 +677,11 @@ function buildGroupItem(entry: unknown, groupKey: string, repoContext?: RepoCont
 }
 
 function toGroupItems(value: unknown, groupKey: string, repoContext?: RepoContext, sourceBasePath?: string): MarketplaceGroupItem[] {
+	if (typeof value === 'string') {
+		const item = buildGroupItem(value, groupKey, repoContext, sourceBasePath);
+		return item ? [item] : [];
+	}
+
 	if (Array.isArray(value)) {
 		return value
 			.map((entry) => buildGroupItem(entry, groupKey, repoContext, sourceBasePath))
@@ -704,22 +732,23 @@ function mergeGroupItems(primary: MarketplaceGroupItem[], secondary: Marketplace
 	return Array.from(deduped.values());
 }
 
-function collectGroupValues(record: UnknownRecord, key: string, repoContext?: RepoContext, sourceBasePath?: string): MarketplaceGroupItem[] {
+function collectGroupValues(record: UnknownRecord, sourceKey: string, groupKey: string, repoContext?: RepoContext, sourceBasePath?: string): MarketplaceGroupItem[] {
 	const manifest = asRecord(record.manifest);
-	const primary = toGroupItems(record[key], key, repoContext, sourceBasePath);
-	const secondary = toGroupItems(manifest?.[key], key, repoContext, sourceBasePath);
+	const primary = toGroupItems(record[sourceKey], groupKey, repoContext, sourceBasePath);
+	const secondary = toGroupItems(manifest?.[sourceKey], groupKey, repoContext, sourceBasePath);
 	return mergeGroupItems(primary, secondary);
 }
 
 function collectGroupValuesForKeys(
 	record: UnknownRecord,
 	keys: string[],
+	groupKey: string,
 	repoContext?: RepoContext,
 	sourceBasePath?: string
 ): MarketplaceGroupItem[] {
 	let merged: MarketplaceGroupItem[] = [];
 	for (const key of keys) {
-		const items = collectGroupValues(record, key, repoContext, sourceBasePath)
+		const items = collectGroupValues(record, key, groupKey, repoContext, sourceBasePath)
 			.map((item) => ({ ...item, path: item.path ? normalizeRelativePath(item.path) : item.path }));
 		merged = mergeGroupItems(merged, items);
 	}
@@ -742,7 +771,7 @@ function extractPluginGroups(record: UnknownRecord, repoContext?: RepoContext, s
 
 	const groups: MarketplacePluginGroup[] = [];
 	for (const definition of groupDefinitions) {
-		const items = collectGroupValuesForKeys(record, definition.sourceKeys, repoContext, sourceBasePath);
+		const items = collectGroupValuesForKeys(record, definition.sourceKeys, definition.key, repoContext, sourceBasePath);
 		if (items.length > 0) {
 			groups.push({
 				name: definition.name,
@@ -1030,6 +1059,10 @@ export function normalizeMarketplaceDocument(
 	marketplaceDocumentUrl: string = sourceUrl,
 	repoContext?: RepoContext
 ): MarketplaceFetchResult {
+	if (!repoContext) {
+		repoContext = repoContextFromRawUrl(marketplaceDocumentUrl);
+	}
+
 	const entries = getPluginList(document);
 	const warnings: string[] = [];
 	const plugins: MarketplacePlugin[] = [];
