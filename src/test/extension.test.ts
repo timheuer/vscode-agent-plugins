@@ -174,6 +174,33 @@ suite('Extension Test Suite', () => {
 		assert.ok(result.content?.includes('"myServer"'));
 	});
 
+	test('adds <name>.agent.md fallback for directory-based agent entries', () => {
+		const result = normalizeMarketplaceDocument(
+			{
+				plugins: [
+					{
+						id: 'agent-plugin',
+						name: 'Agent Plugin',
+						agents: ['./agents/code-reviewer']
+					}
+				]
+			},
+			'https://github.com/org/repo',
+			'https://raw.githubusercontent.com/org/repo/main/.claude-plugin/marketplace.json',
+			{
+				owner: 'org',
+				repo: 'repo',
+				branch: 'main',
+				rawBaseUrl: 'https://raw.githubusercontent.com/org/repo/main',
+				blobBaseUrl: 'https://github.com/org/repo/blob/main'
+			}
+		);
+
+		const agentsGroup = result.plugins[0].groups.find((group) => group.key === 'agents');
+		assert.ok(agentsGroup);
+		assert.ok(agentsGroup?.items[0].metadataFallbackUrls.includes('https://raw.githubusercontent.com/org/repo/main/agents/code-reviewer/code-reviewer.agent.md'));
+	});
+
 	test('detects curated skill profile directory', () => {
 		const profiles = getSupportedSkillProfileDirectories([
 			{ type: 'dir', name: '.curated' },

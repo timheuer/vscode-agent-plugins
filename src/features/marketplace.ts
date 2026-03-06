@@ -539,12 +539,23 @@ function summaryFromRecord(record: UnknownRecord): string | undefined {
 	return asString(record.name) ?? asString(record.id) ?? asString(record.slug) ?? asString(record.title);
 }
 
-function descriptorDefaultsForGroup(groupKey: string): string[] {
+function descriptorDefaultsForGroup(groupKey: string, itemName?: string): string[] {
+	const normalizedItemName = itemName?.trim();
+	const markdownNameCandidate = normalizedItemName ? `${normalizedItemName}.md` : undefined;
+	const agentMarkdownNameCandidate = normalizedItemName ? `${normalizedItemName}.agent.md` : undefined;
+
 	switch (groupKey) {
 		case 'skills':
-			return ['SKILL.md', 'README.md'];
+			return ['SKILL.md', 'README.md', ...(markdownNameCandidate ? [markdownNameCandidate] : [])];
 		case 'agents':
-			return ['AGENT.md', 'AGENTS.md', 'README.md'];
+			return [
+				'AGENT.md',
+				'AGENTS.md',
+				'README.md',
+				'agent.md',
+				...(agentMarkdownNameCandidate ? [agentMarkdownNameCandidate] : []),
+				...(markdownNameCandidate ? [markdownNameCandidate] : [])
+			];
 		case 'hooks':
 			return ['hooks.json', 'hooks/hooks.json', 'README.md'];
 		case 'mcp':
@@ -562,11 +573,11 @@ function looksLikeFilePath(pathValue: string): boolean {
 
 function buildItemFromPath(pathValue: string, groupKey: string, repoContext?: RepoContext): MarketplaceGroupItem {
 	const cleanedPath = normalizeRelativePath(pathValue);
-	const descriptorFiles = descriptorDefaultsForGroup(groupKey);
 
 	// Extract the last path segment as the display name
 	const pathSegments = cleanedPath.split('/').filter(Boolean);
 	const displayName = pathSegments.length > 0 ? pathSegments[pathSegments.length - 1] : cleanedPath;
+	const descriptorFiles = descriptorDefaultsForGroup(groupKey, displayName);
 
 	if (!repoContext || isHttpUrl(cleanedPath)) {
 		return {
