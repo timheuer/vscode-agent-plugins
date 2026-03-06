@@ -475,7 +475,12 @@ async function listRepoDirectory(repoContext: RepoContext, relativePath: string)
 
 		if (!response.ok) {
 			getLogger()?.trace(`GitHub API returned ${response.status} ${response.statusText} for ${url}`);
-			cache?.set(cacheKey, undefined);
+			// Only cache confirmed non-existence (404). Transient errors like
+			// 403 rate-limit or 500 server errors should not be cached so the
+			// next request can retry.
+			if (response.status === 404) {
+				cache?.set(cacheKey, undefined);
+			}
 			return undefined;
 		}
 
@@ -842,7 +847,14 @@ async function resolveGroupItemsFromConfig(
 			return expanded;
 		}
 
-		return [buildItemFromPath(resolvedPath, groupKey, repoContext)];
+		// Only create a direct item if the path looks like a file (has an extension).
+		// Directory-like paths that failed expansion should not produce a bogus item
+		// (e.g. when a GitHub API call was rate-limited).
+		if (looksLikeFilePath(resolvedPath)) {
+			return [buildItemFromPath(resolvedPath, groupKey, repoContext)];
+		}
+
+		return [];
 	}
 
 	// Handle array of strings or objects
@@ -854,7 +866,7 @@ async function resolveGroupItemsFromConfig(
 				const expanded = await expandGroupDirectoryReference(resolvedPath, groupKey, repoContext);
 				if (expanded && expanded.length > 0) {
 					items.push(...expanded);
-				} else {
+				} else if (looksLikeFilePath(resolvedPath)) {
 					items.push(buildItemFromPath(resolvedPath, groupKey, repoContext));
 				}
 			} else {
