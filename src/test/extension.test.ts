@@ -1,5 +1,8 @@
 import * as assert from 'assert';
+import * as vscode from 'vscode';
 import { buildInstallPayload } from '../features/delegation';
+import { fetchWithGitHubAuth } from '../features/github-auth';
+import { initLogger } from '../features/logger';
 import {
 	fetchGroupItemContent,
 	getSupportedSkillProfileDirectories,
@@ -8,6 +11,14 @@ import {
 } from '../features/marketplace';
 
 suite('Extension Test Suite', () => {
+	const originalFetch = globalThis.fetch;
+	const originalGetSession = vscode.authentication.getSession;
+
+	teardown(() => {
+		globalThis.fetch = originalFetch;
+		(vscode.authentication as typeof vscode.authentication & { getSession: typeof vscode.authentication.getSession }).getSession = originalGetSession;
+	});
+
 	test('normalizes marketplace plugin entries', () => {
 		const result = normalizeMarketplaceDocument(
 			{
@@ -219,5 +230,70 @@ suite('Extension Test Suite', () => {
 		]);
 
 		assert.deepStrictEqual(profiles, []);
+	});
+
+	test('retries a 403 GitHub request without auth header', async () => {
+		const seenAuthHeaders: Array<string | null> = [];
+		(vscode.authentication as typeof vscode.authentication & { getSession: typeof vscode.authentication.getSession }).getSession = async () => ({
+			id: 'session-id',
+			accessToken: 'token-123',
+			account: { id: 'account-id', label: 'test-user' },
+			scopes: ['repo']
+		});
+
+		globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+			const headers = new Headers(init?.headers);
+			seenAuthHeaders.push(headers.get('authorization'));
+
+			if (seenAuthHeaders.length === 1) {
+				return new Response('forbidden', { status: 403, statusText: 'Forbidden' });
+			}
+
+			return new Response('ok', { status: 200, statusText: 'OK' });
+		}) as typeof globalThis.fetch;
+
+		const response = await fetchWithGitHubAuth('https://api.github.com/repos/example/repo/contents/file.txt');
+
+		assert.strictEqual(response.status, 200);
+		assert.deepStrictEqual(seenAuthHeaders, ['Bearer token-123', null]);
+	});
+
+	test('logs an error when the unauthenticated retry still looks rate-limited', async () => {
+		const errors: string[] = [];
+		initLogger({
+			trace: () => undefined,
+			error: (message: string) => {
+				errors.push(message);
+			}
+		} as any);
+
+		(vscode.authentication as typeof vscode.authentication & { getSession: typeof vscode.authentication.getSession }).getSession = async () => ({
+			id: 'session-id',
+			accessToken: 'token-123',
+			account: { id: 'account-id', label: 'test-user' },
+			scopes: ['repo']
+		});
+
+		let callCount = 0;
+		globalThis.fetch = (async () => {
+			callCount += 1;
+			if (callCount === 1) {
+				return new Response('forbidden', { status: 403, statusText: 'Forbidden' });
+			}
+
+			return new Response('API rate limit exceeded', {
+				status: 403,
+				statusText: 'Forbidden',
+				headers: {
+					'x-ratelimit-remaining': '0'
+				}
+			});
+		}) as typeof globalThis.fetch;
+
+		const response = await fetchWithGitHubAuth('https://api.github.com/repos/example/repo/contents/file.txt');
+
+		assert.strictEqual(response.status, 403);
+		assert.strictEqual(errors.length, 1);
+		assert.match(errors[0], /rate-limited/i);
 	});
 });

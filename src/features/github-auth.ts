@@ -77,6 +77,61 @@ export async function getGitHubAuthHeaders(): Promise<Record<string, string>> {
     return {};
 }
 
+function mergeHeaders(
+    authHeaders: Record<string, string>,
+    requestHeaders?: RequestInit['headers']
+): Headers {
+    const headers = new Headers(requestHeaders);
+
+    for (const [key, value] of Object.entries(authHeaders)) {
+        if (!headers.has(key)) {
+            headers.set(key, value);
+        }
+    }
+
+    return headers;
+}
+
+function buildRequestInit(options: RequestInit, headers: Headers): RequestInit {
+    return {
+        ...options,
+        headers
+    };
+}
+
+async function getGitHubRateLimitReason(response: Response): Promise<string | undefined> {
+    if (response.status !== 403 && response.status !== 429) {
+        return undefined;
+    }
+
+    const remaining = response.headers.get('x-ratelimit-remaining');
+    if (remaining === '0') {
+        return 'x-ratelimit-remaining=0';
+    }
+
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter) {
+        return `retry-after=${retryAfter}`;
+    }
+
+    try {
+        const body = (await response.clone().text()).toLowerCase();
+        if (body.includes('secondary rate limit')) {
+            return 'secondary rate limit';
+        }
+        if (body.includes('rate limit')) {
+            return 'rate limit';
+        }
+        if (body.includes('abuse detection')) {
+            return 'abuse detection';
+        }
+    } catch {
+        // Ignore unreadable response bodies when probing rate-limit details.
+    }
+
+    return undefined;
+}
+
 /**
  * Fetch with GitHub authentication if available.
  * Falls back to unauthenticated request if no session exists.
@@ -86,15 +141,27 @@ export async function fetchWithGitHubAuth(
     options: RequestInit = {}
 ): Promise<Response> {
     const authHeaders = await getGitHubAuthHeaders();
-    const headers = {
-        ...authHeaders,
-        ...((options.headers as Record<string, string>) || {})
-    };
+    const headers = mergeHeaders(authHeaders, options.headers);
+    const usedGitHubAuthHeader = Boolean(authHeaders.Authorization) && headers.get('authorization') === authHeaders.Authorization;
+    const response = await fetch(url, buildRequestInit(options, headers));
 
-    return fetch(url, {
-        ...options,
-        headers
-    });
+    if (response.status !== 403 || !usedGitHubAuthHeader) {
+        return response;
+    }
+
+    getLogger()?.trace(`GitHub request returned 403 with auth header, retrying without auth: ${url}`);
+    const retryHeaders = new Headers(headers);
+    retryHeaders.delete('authorization');
+
+    const retryResponse = await fetch(url, buildRequestInit(options, retryHeaders));
+    if (!retryResponse.ok) {
+        const rateLimitReason = await getGitHubRateLimitReason(retryResponse);
+        if (rateLimitReason) {
+            getLogger()?.error(`GitHub request appears rate-limited after retrying without auth header (${rateLimitReason}): ${url}`);
+        }
+    }
+
+    return retryResponse;
 }
 
 /**
