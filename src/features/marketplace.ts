@@ -508,6 +508,27 @@ function primaryDescriptorForGroup(groupKey: string): string | undefined {
 	}
 }
 
+async function isLeafGroupDirectory(
+	relativePath: string,
+	groupKey: string,
+	repoContext: RepoContext
+): Promise<boolean> {
+	const normalizedPath = normalizeRelativePath(relativePath);
+	const primaryDescriptor = primaryDescriptorForGroup(groupKey);
+	if (!primaryDescriptor) {
+		return false;
+	}
+
+	const entries = await listRepoDirectory(repoContext, normalizedPath);
+	if (!entries || entries.length === 0) {
+		return false;
+	}
+
+	return entries.some(
+		(entry) => entry.type === 'file' && entry.name?.toLowerCase() === primaryDescriptor.toLowerCase()
+	);
+}
+
 async function expandGroupDirectoryReference(
 	referencePath: string,
 	groupKey: string,
@@ -643,10 +664,10 @@ function buildItemFromPath(pathValue: string, groupKey: string, repoContext?: Re
 
 function buildGroupItem(entry: unknown, groupKey: string, repoContext?: RepoContext, sourceBasePath?: string): MarketplaceGroupItem | undefined {
 	const resolvePath = (pathValue: string): string => {
-		if (isHttpUrl(pathValue) || !sourceBasePath) {
-			return pathValue;
-		}
 		const normalizedPath = normalizeRelativePath(pathValue);
+		if (isHttpUrl(pathValue) || !sourceBasePath) {
+			return normalizedPath;
+		}
 		return `${sourceBasePath}/${normalizedPath}`;
 	};
 
@@ -832,10 +853,10 @@ async function resolveGroupItemsFromConfig(
 ): Promise<MarketplaceGroupItem[]> {
 	// Helper to prepend source base path to relative paths
 	const resolvePath = (pathValue: string): string => {
-		if (isHttpUrl(pathValue) || !sourceBasePath) {
-			return pathValue;
-		}
 		const normalizedPath = normalizeRelativePath(pathValue);
+		if (isHttpUrl(pathValue) || !sourceBasePath) {
+			return normalizedPath;
+		}
 		const normalizedBase = normalizeRelativePath(sourceBasePath).replace(/\/+$/, '');
 		return normalizedBase ? `${normalizedBase}/${normalizedPath}` : normalizedPath;
 	};
@@ -847,10 +868,9 @@ async function resolveGroupItemsFromConfig(
 			return expanded;
 		}
 
-		// Only create a direct item if the path looks like a file (has an extension).
-		// Directory-like paths that failed expansion should not produce a bogus item
-		// (e.g. when a GitHub API call was rate-limited).
-		if (looksLikeFilePath(resolvedPath)) {
+		// Preserve manifest entries that point directly at a leaf item directory
+		// such as skills/foo with SKILL.md inside.
+		if (looksLikeFilePath(resolvedPath) || await isLeafGroupDirectory(resolvedPath, groupKey, repoContext)) {
 			return [buildItemFromPath(resolvedPath, groupKey, repoContext)];
 		}
 
@@ -866,7 +886,7 @@ async function resolveGroupItemsFromConfig(
 				const expanded = await expandGroupDirectoryReference(resolvedPath, groupKey, repoContext);
 				if (expanded && expanded.length > 0) {
 					items.push(...expanded);
-				} else if (looksLikeFilePath(resolvedPath)) {
+				} else if (looksLikeFilePath(resolvedPath) || await isLeafGroupDirectory(resolvedPath, groupKey, repoContext)) {
 					items.push(buildItemFromPath(resolvedPath, groupKey, repoContext));
 				}
 			} else {
@@ -1183,6 +1203,37 @@ export async function fetchMarketplace(sourceUrl: string): Promise<MarketplaceFe
 	}
 }
 
+export async function fetchCachedMarketplace(
+	sourceUrl: string,
+	options?: { forceRefresh?: boolean }
+): Promise<MarketplaceFetchResult & { fromCache?: boolean; refreshing?: boolean }> {
+	const cache = getCache();
+	const cacheKey = CacheKeys.marketplace(sourceUrl);
+
+	if (!cache) {
+		return fetchMarketplace(sourceUrl);
+	}
+
+	try {
+		const result = await cache.getWithRefresh(cacheKey, () => fetchMarketplace(sourceUrl), {
+			forceRefresh: options?.forceRefresh
+		});
+
+		return {
+			...result.data,
+			fromCache: result.fromCache,
+			refreshing: result.refreshing
+		};
+	} catch (error) {
+		getLogger()?.error(`Failed to fetch marketplace ${sourceUrl}: ${error}`);
+		return {
+			plugins: [],
+			warnings: [],
+			errors: [`Failed to fetch marketplace ${sourceUrl}: ${error instanceof Error ? error.message : String(error)}`]
+		};
+	}
+}
+
 async function fetchAllMarketplacesCore(
 	urls: string[],
 	onProgress?: (event: FetchProgressEvent) => void
@@ -1317,6 +1368,10 @@ export function prefetchMarketplaces(urls: string[]): void {
 		getLogger()?.trace('Refreshing stale marketplace cache...');
 		cache.refreshInBackground(cacheKey, () => fetchAllMarketplacesCore(urls));
 	}
+}
+
+export function clearMarketplaceListCache(urls: string[]): void {
+	getCache()?.clear(CacheKeys.allMarketplaces(urls));
 }
 
 /**

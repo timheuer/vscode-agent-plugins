@@ -80,6 +80,11 @@
         "icon": "$(sync)"
       },
       {
+        "command": "vscode-agent-plugins.refreshMarketplaceNode",
+        "title": "Refresh",
+        "icon": "$(sync)"
+      },
+      {
         "command": "vscode-agent-plugins.installPlugin",
         "title": "Install Plugin",
         "icon": "$(cloud-download)"
@@ -155,6 +160,11 @@
           "command": "vscode-agent-plugins.installPlugin",
           "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem == plugin",
           "group": "1_install"
+        },
+        {
+          "command": "vscode-agent-plugins.refreshMarketplaceNode",
+          "when": "view == vscode-agent-plugins.marketplaceExplorer && viewItem =~ /^marketplace/",
+          "group": "inline@2"
         },
         {
           "command": "vscode-agent-plugins.removeMarketplaceFromTree",

@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import type { ExtensionServices } from '../extension';
 import {
     fetchAllMarketplaces,
+    fetchCachedMarketplace,
+    clearMarketplaceListCache,
     FetchProgressEvent,
     MarketplacePlugin,
     MarketplacePluginGroup,
@@ -68,7 +70,7 @@ export class MarketplaceTreeDataProvider implements vscode.TreeDataProvider<Tree
         this._onDidChangeTreeData.fire();
     }
 
-    async loadData(): Promise<void> {
+    async loadData(options?: { forceRefresh?: boolean }): Promise<void> {
         if (this._loading) {
             return;
         }
@@ -133,6 +135,7 @@ export class MarketplaceTreeDataProvider implements vscode.TreeDataProvider<Tree
                     };
 
                     const result = await fetchAllMarketplaces(urls, {
+                        forceRefresh: options?.forceRefresh,
                         onProgress,
                         onRefreshComplete: (updated) => {
                             this._refreshingInBackground = false;
@@ -172,6 +175,56 @@ export class MarketplaceTreeDataProvider implements vscode.TreeDataProvider<Tree
         }
     }
 
+    async refreshMarketplace(url: string, options?: { forceRefresh?: boolean }): Promise<void> {
+        if (this._loading) {
+            return;
+        }
+
+        const urls = getMarketplaceUrls();
+        if (!urls.includes(url)) {
+            return;
+        }
+
+        this._loading = true;
+        try {
+            await vscode.window.withProgress(
+                { location: { viewId: 'vscode-agent-plugins.marketplaceExplorer' } },
+                async () => {
+                    const statusBar = this.services.statusBarItem;
+                    const label = this.formatMarketplaceLabel(url);
+
+                    statusBar.text = `$(loading~spin) Fetching ${label} (1/1)`;
+                    statusBar.tooltip = `Agent Plugins: Fetching ${label}`;
+                    statusBar.show();
+
+                    const result = await fetchCachedMarketplace(url, { forceRefresh: options?.forceRefresh });
+                    this.updateSingleMarketplaceFromResult(url, result.plugins);
+                    clearMarketplaceListCache(urls);
+
+                    if (result.fromCache) {
+                        statusBar.text = `$(check) Loaded ${result.plugins.length} plugin(s) from cache`;
+                    } else {
+                        statusBar.text = `$(check) Loaded ${result.plugins.length} plugin(s)`;
+                    }
+                    setTimeout(() => statusBar.hide(), 3000);
+
+                    for (const warning of result.warnings) {
+                        this.services.logger.warn(`[marketplace] ${warning}`);
+                    }
+                    for (const error of result.errors) {
+                        this.services.logger.error(`[marketplace] ${error}`);
+                    }
+
+                    const cacheNote = result.fromCache ? ' (cached)' : '';
+                    const refreshNote = result.refreshing ? ' - refreshing in background' : '';
+                    this.services.logger.info(`Marketplace '${url}' refreshed with ${result.plugins.length} plugin(s)${cacheNote}${refreshNote}.`);
+                }
+            );
+        } finally {
+            this._loading = false;
+        }
+    }
+
     private updateMarketplacesFromResult(result: { plugins: MarketplacePlugin[] }, urls: string[]): void {
         const marketplaceMap = new Map<string, MarketplacePlugin[]>();
         for (const plugin of result.plugins) {
@@ -185,6 +238,23 @@ export class MarketplaceTreeDataProvider implements vscode.TreeDataProvider<Tree
             url,
             plugins: marketplaceMap.get(url) ?? []
         }));
+
+        this._onDidChangeTreeData.fire();
+    }
+
+    private updateSingleMarketplaceFromResult(url: string, plugins: MarketplacePlugin[]): void {
+        const nextNode: MarketplaceNode = {
+            type: 'marketplace',
+            url,
+            plugins: plugins.filter((plugin) => plugin.sourceUrl === url)
+        };
+
+        const index = this._marketplaces.findIndex((marketplace) => marketplace.url === url);
+        if (index >= 0) {
+            this._marketplaces[index] = nextNode;
+        } else {
+            this._marketplaces.push(nextNode);
+        }
 
         this._onDidChangeTreeData.fire();
     }

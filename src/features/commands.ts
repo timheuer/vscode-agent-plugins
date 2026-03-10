@@ -21,7 +21,6 @@ import {
     fetchAllMarketplaces,
     fetchGroupItemDescription,
     fetchGroupItemContent,
-    clearMarketplaceCache,
     type MarketplacePlugin,
     type MarketplaceGroupItem
 } from './marketplace';
@@ -229,10 +228,6 @@ export async function browseMarketplace(services: ExtensionServices): Promise<vo
     const descriptorCache = new Map<string, { description?: string; error?: string; docUrl?: string }>();
 
     const refreshPanelState = async (forceRefresh = false): Promise<void> => {
-        if (forceRefresh) {
-            services.logger.info('Force refresh requested - clearing marketplace cache');
-            clearMarketplaceCache();
-        }
         viewModel = await loadMarketplaceViewModel(services.logger, { forceRefresh });
         pluginKeyMap = createPluginKeyMap(viewModel.plugins);
         descriptorCache.clear();
