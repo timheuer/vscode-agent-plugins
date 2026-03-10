@@ -1,6 +1,6 @@
 # Agent Plugins Browser
 
-Browse one or more AI agent plugin marketplaces (each URL points to `marketplace.json`), select plugins, and install/update them directly.
+Browse one or more AI agent plugin marketplaces, select plugins, and install/update them directly.
 
 ![preview](https://github.com/user-attachments/assets/84f5986c-02cc-4edb-b7b5-5398439a96df)
 
@@ -23,6 +23,7 @@ Alternative full-screen marketplace browser built with standard VS Code UI eleme
 
 Supports both:
 
+- GitHub `owner/repo` shorthand (for example, `anthropics/skills`), expanded to `https://github.com/owner/repo`
 - Repository URLs (e.g., `https://github.com/anthropics/skills`) resolved to `.claude-plugin/marketplace.json`
 - Direct marketplace JSON URLs
 
@@ -71,7 +72,7 @@ Detailed logging with configurable log levels.
 | Command | Description |
 |---------|-------------|
 | `Agent Plugins: Browse Marketplace` | Open the webview marketplace browser |
-| `Agent Plugins: Add Marketplace URL` | Add a new marketplace URL to settings |
+| `Agent Plugins: Add Marketplace URL` | Add a new marketplace URL or GitHub `owner/repo` shorthand to settings |
 | `Agent Plugins: Remove Marketplace URL` | Remove a marketplace URL from settings |
 | `Agent Plugins: Refresh` | Refresh the tree view data |
 | `Agent Plugins: Settings` | Open extension settings |
@@ -88,7 +89,7 @@ Detailed logging with configurable log levels.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `agentPlugins.marketplaces` | `string[]` | `[]` | List of marketplace.json URLs to browse |
+| `agentPlugins.marketplaces` | `string[]` | `[]` | List of marketplace.json URLs or GitHub `owner/repo` shorthands to browse |
 | `agentPlugins.logLevel` | `string` | `info` | Log level (`off`, `error`, `warn`, `info`, `debug`, `trace`) |
 
 ## Requirements

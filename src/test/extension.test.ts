@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
+import { normalizeMarketplaceUrlInput, validateMarketplaceUrlInput } from '../features/config';
 import { buildInstallPayload } from '../features/delegation';
 import { fetchWithGitHubAuth } from '../features/github-auth';
 import { initLogger } from '../features/logger';
@@ -70,6 +71,21 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(payload.scope, 'workspace');
 		assert.strictEqual(payload.plugins.length, 1);
 		assert.strictEqual(payload.marketplaceUrls.length, 1);
+	});
+
+	test('normalizes GitHub owner repo marketplace shorthand', () => {
+		assert.strictEqual(
+			normalizeMarketplaceUrlInput('anthropics/skills'),
+			'https://github.com/anthropics/skills'
+		);
+		assert.strictEqual(
+			normalizeMarketplaceUrlInput('anthropics/skills.git'),
+			'https://github.com/anthropics/skills'
+		);
+	});
+
+	test('accepts GitHub owner repo marketplace shorthand in validation', () => {
+		assert.strictEqual(validateMarketplaceUrlInput('anthropics/skills'), undefined);
 	});
 
 	test('resolves relative marketplace document references', () => {

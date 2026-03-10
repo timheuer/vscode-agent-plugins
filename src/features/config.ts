@@ -5,6 +5,8 @@ export const MARKETPLACES_KEY = 'marketplaces';
 export const LOG_LEVEL_KEY = 'logLevel';
 export const CACHE_DURATION_KEY = 'cacheDuration';
 
+const GITHUB_OWNER_REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?$/;
+
 /**
  * Get cache duration in days (default: 7 days).
  */
@@ -12,12 +14,43 @@ export function getCacheDurationDays(): number {
     return vscode.workspace.getConfiguration(CONFIG_SECTION).get<number>(CACHE_DURATION_KEY, 7);
 }
 
+export function normalizeMarketplaceUrlInput(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return '';
+    }
+
+    if (GITHUB_OWNER_REPO_PATTERN.test(trimmed)) {
+        const [owner, rawRepo] = trimmed.split('/');
+        return `https://github.com/${owner}/${rawRepo.replace(/\.git$/i, '')}`;
+    }
+
+    return trimmed;
+}
+
+export function validateMarketplaceUrlInput(value: string): string | undefined {
+    const normalized = normalizeMarketplaceUrlInput(value);
+    if (!normalized) {
+        return 'Enter a valid URL or GitHub owner/repo.';
+    }
+
+    try {
+        const parsed = new URL(normalized);
+        if (!/^https?:$/i.test(parsed.protocol)) {
+            return 'Only http/https URLs are supported.';
+        }
+        return undefined;
+    } catch {
+        return 'Enter a valid URL or GitHub owner/repo.';
+    }
+}
+
 function normalizeUrls(urls: string[] | undefined): string[] {
     if (!urls) {
         return [];
     }
 
-    return Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean)));
+    return Array.from(new Set(urls.map((url) => normalizeMarketplaceUrlInput(url)).filter(Boolean)));
 }
 
 function getMarketplaceSettingInspection() {

@@ -5,7 +5,9 @@ import {
     MARKETPLACES_KEY,
     getMarketplaceUrls,
     getMarketplaceUrlsForTarget,
+    normalizeMarketplaceUrlInput,
     pickSettingsTarget,
+    validateMarketplaceUrlInput,
     updateMarketplaceUrls
 } from './config';
 import { getNonce, isSafeUrl, escapeHtml } from './utils';
@@ -72,25 +74,17 @@ async function loadMarketplaceViewModel(
 
 export async function addMarketplaceUrl({ logger }: ExtensionServices): Promise<void> {
     const input = await vscode.window.showInputBox({
-        prompt: 'Enter a marketplace URL that points to marketplace.json',
-        placeHolder: 'https://example.com/marketplace.json',
+        prompt: 'Enter a marketplace URL or GitHub owner/repo',
+        placeHolder: 'anthropics/skills or https://example.com/marketplace.json',
         ignoreFocusOut: true,
-        validateInput: (value) => {
-            try {
-                const parsed = new URL(value.trim());
-                if (!/^https?:$/i.test(parsed.protocol)) {
-                    return 'Only http/https URLs are supported.';
-                }
-                return undefined;
-            } catch {
-                return 'Enter a valid URL.';
-            }
-        }
+        validateInput: validateMarketplaceUrlInput
     });
 
     if (!input) {
         return;
     }
+
+    const normalizedInput = normalizeMarketplaceUrlInput(input);
 
     const target = await pickSettingsTarget();
     if (!target) {
@@ -98,9 +92,9 @@ export async function addMarketplaceUrl({ logger }: ExtensionServices): Promise<
     }
 
     const existing = getMarketplaceUrlsForTarget(target);
-    const updated = [...existing, input.trim()];
+    const updated = [...existing, normalizedInput];
     await updateMarketplaceUrls(updated, target);
-    logger.info(`Added marketplace URL: ${input.trim()}`);
+    logger.info(`Added marketplace URL: ${normalizedInput}`);
     vscode.window.showInformationMessage('Marketplace URL added.');
 }
 

@@ -174,10 +174,10 @@
         "agentPlugins.marketplaces": {
           "type": "array",
           "default": [ ],
-          "description": "List of marketplace.json URLs to browse for agent plugins.",
+          "description": "List of marketplace.json URLs or GitHub owner/repo shorthands to browse for agent plugins.",
           "items": {
             "type": "string",
-            "pattern": "^https?://"
+            "pattern": "^(https?://.+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\\.git)?)$"
           }
         },
         "agentPlugins.logLevel": {
